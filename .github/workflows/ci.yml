@@ -7,12 +7,27 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  QT_QPA_PLATFORM: offscreen
 
 jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Install Qt / EGL libs (PySide6 on headless Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libegl1 \
+            libgl1 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-keysyms1 \
+            libxcb-shape0 \
+            libxcb-xinerama0 \
+            libxcb1
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"

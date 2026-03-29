@@ -2,6 +2,8 @@
 
 Data viewing and inspection tooling built on **synarius-core** (no GUI in core; this package can add viewers, CLIs, or small UIs).
 
+**Repository:** [synarius-project/synarius-dataviewer](https://github.com/synarius-project/synarius-dataviewer)
+
 ## Install (development)
 
 **CI / clones** resolve `synarius-core` via the Git URL pinned in `pyproject.toml` (same pattern as `synarius-studio`).

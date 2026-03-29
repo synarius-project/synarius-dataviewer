@@ -1,6 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller one-file Windows build bundling ``synarius_dataviewer`` and ``synarius_core``.
+PyInstaller one-file Windows build bundling ``synarius_dataviewer``, Qt, and scientific stack.
+
+Qt needs ``collect_all('PySide6')`` (platform plugins). ``pandas`` / ``pyarrow`` / ``asammdf``
+/ ``pyqtgraph`` pull many data files and hidden imports — bundle them explicitly.
 
 From repo root (after ``pip install . pyinstaller``)::
 
@@ -21,7 +24,17 @@ datas: list[tuple[str, str]] = []
 binaries: list = []
 hiddenimports: list[str] = []
 
-for _pkg in ("synarius_core", "sqlalchemy"):
+for _pkg in (
+    "synarius_core",
+    "sqlalchemy",
+    "PySide6",
+    "shiboken6",
+    "pyqtgraph",
+    "pandas",
+    "pyarrow",
+    "asammdf",
+    "numpy",
+):
     d, b, h = collect_all(_pkg)
     datas += d
     binaries += b
@@ -57,7 +70,7 @@ exe = EXE(
     upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
