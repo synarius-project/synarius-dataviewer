@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synarius-dataviewer"
+version = "0.0.1"
+description = "Data viewing and inspection tools for Synarius (built on synarius-core)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Synarius Contributors" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+]
+dependencies = [
+  "synarius-core",
+]
+
+[project.scripts]
+synarius-dataviewer = "synarius_dataviewer.__main__:main"
+
+[project.urls]
+Homepage = "https://example.invalid/synarius-dataviewer"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["synarius_dataviewer*"]
+
+# Monorepo: resolve synarius_core from sibling without installing into the venv.
+[tool.pyright]
+extraPaths = ["../synarius-core/src"]
+
+[project.optional-dependencies]
+dev = []
