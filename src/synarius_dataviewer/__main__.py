@@ -1,8 +1,10 @@
 """CLI entry for synarius-dataviewer (extend with real viewers later)."""
 
+from synarius_dataviewer._version import __version__
+
 
 def main() -> int:
-    print("synarius-dataviewer: no viewer wired yet; package skeleton is ready.")
+    print(f"synarius-dataviewer {__version__}: no viewer wired yet; package skeleton is ready.")
     return 0
 
 

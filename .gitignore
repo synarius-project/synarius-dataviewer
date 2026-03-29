@@ -7,6 +7,8 @@ dist/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+docs/_build/
+docs/_sphinx_test_build/
 .venv/
 venv/
 .env
