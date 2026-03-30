@@ -64,17 +64,22 @@ def studio_toolbar_stylesheet() -> str:
 
 
 def _scoped_channel_grid_table_qss(scope: str) -> str:
-    """Shared QTableWidget + header look (signal list & legend). *scope* e.g. ``QWidget#ChannelPanel``."""
+    """Shared QTableWidget + header look (signal list & legend).
+
+    For Dataviewer we mirror Synarius Studio: no grid lines, dark header with white text.
+    *scope* e.g. ``QWidget#ChannelPanel``.
+    """
     bg = RESOURCES_PANEL_BACKGROUND
     alt = RESOURCES_PANEL_ALTERNATE_ROW
-    hdr = _rgb_hex_scale(bg, 0.96)
-    grid = "#88aacc"
+    hdr_bg = "#353535"
+    hdr_fg = "#ffffff"
     return (
         f"{scope} QTableWidget {{"
         f" background-color: {bg};"
         f" alternate-background-color: {alt};"
         f" color: #1a1a1a;"
-        f" gridline-color: {grid};"
+        f" gridline-color: transparent;"
+        f" border: none;"
         f" font-size: 11px;"
         f"}}"
         f"{scope} QTableWidget::item {{ padding: 0px 2px; }}"
@@ -83,12 +88,22 @@ def _scoped_channel_grid_table_qss(scope: str) -> str:
         f" color: #ffffff;"
         f"}}"
         f"{scope} QHeaderView::section {{"
-        f" background-color: {hdr};"
-        f" color: #1a1a1a;"
-        f" padding: 1px 3px;"
-        f" border: 1px solid {grid};"
+        f" background-color: {hdr_bg};"
+        f" color: {hdr_fg};"
+        f" padding: 2px 4px;"
+        f" border: none;"
         f" font-size: 11px;"
         f"}}"
+        f"{scope} QScrollBar:vertical {{ background: #2f2f2f; width: 12px; margin: 0; border: none; }}"
+        f"{scope} QScrollBar::handle:vertical {{ background: #5a5a5a; min-height: 20px; border-radius: 4px; }}"
+        f"{scope} QScrollBar::handle:vertical:hover {{ background: #6a6a6a; }}"
+        f"{scope} QScrollBar::add-line:vertical, {scope} QScrollBar::sub-line:vertical {{ height: 0; border: none; background: none; }}"
+        f"{scope} QScrollBar::add-page:vertical, {scope} QScrollBar::sub-page:vertical {{ background: #2f2f2f; }}"
+        f"{scope} QScrollBar:horizontal {{ background: #2f2f2f; height: 12px; margin: 0; border: none; }}"
+        f"{scope} QScrollBar::handle:horizontal {{ background: #5a5a5a; min-width: 20px; border-radius: 4px; }}"
+        f"{scope} QScrollBar::handle:horizontal:hover {{ background: #6a6a6a; }}"
+        f"{scope} QScrollBar::add-line:horizontal, {scope} QScrollBar::sub-line:horizontal {{ width: 0; border: none; background: none; }}"
+        f"{scope} QScrollBar::add-page:horizontal, {scope} QScrollBar::sub-page:horizontal {{ background: #2f2f2f; }}"
     )
 
 
@@ -116,8 +131,8 @@ def channel_panel_stylesheet() -> str:
         f"{scope} QLineEdit::placeholder {{ color: #666666; }}"
         + _scoped_channel_grid_table_qss(scope)
         + "QLabel { color: #1a1a1a; }"
-        + "QPushButton { background-color: #586cd4; color: white; border: none;"
+        + "QPushButton { background-color: #000000; color: white; border: none;"
         " border-radius: 4px; padding: 6px 10px; }"
-        + "QPushButton:hover { background-color: #6b7de0; }"
-        + "QPushButton:pressed { background-color: #4858b8; }"
+        + f"QPushButton:hover {{ background-color: {STUDIO_TOOLBAR_ACTION_HOVER}; }}"
+        + f"QPushButton:pressed {{ background-color: {STUDIO_TOOLBAR_ACTION_PRESSED}; }}"
     )

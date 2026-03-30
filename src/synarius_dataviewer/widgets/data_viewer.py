@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import cast
 
 import numpy as np
-from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QHeaderView,
+    QHBoxLayout,
     QLabel,
     QMdiSubWindow,
     QSplitter,
@@ -22,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from synarius_dataviewer.app import theme
+from synarius_dataviewer.app.svg_icons import icon_from_tinted_svg_file
 from synarius_dataviewer.widgets.channel_sidebar import MIME_CHANNEL
 from synarius_dataviewer.widgets.pixmap_scope import PixmapScopeWidget
 
@@ -60,6 +64,9 @@ class DataViewerWidget(QWidget):
 
     channel_drop_requested = Signal(str)
     _color_index: int
+    _min_plot_width = 420
+    _min_legend_width = 260
+    _max_legend_width = 360
 
     def __init__(
         self,
@@ -78,6 +85,9 @@ class DataViewerWidget(QWidget):
         self._legend_visible = True
         self._channel_legend_row: dict[str, int] = {}
         self._legend_split_saved = 380
+        self._slider_cols_saved = 240
+        self._highlighted_channels: set[str] = set()
+        self._scope_window_saved_width: int | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -85,6 +95,8 @@ class DataViewerWidget(QWidget):
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
         self._splitter.setChildrenCollapsible(False)
+        # Allow user to drag-resize boundary between scope and legend.
+        self._splitter.setHandleWidth(6)
 
         plot_column = QWidget()
         plot_column_lay = QVBoxLayout(plot_column)
@@ -94,33 +106,50 @@ class DataViewerWidget(QWidget):
         self._toolbar = QToolBar()
         self._toolbar.setMovable(False)
         self._toolbar.setStyleSheet(theme.studio_toolbar_stylesheet())
-
-        act_adjust = self._toolbar.addAction("Adjust")
-        act_adjust.setToolTip("Autoscale X/Y (PyLinX-style Ctrl+A)")
-        act_adjust.triggered.connect(self._on_adjust)
+        icons_dir = Path(__file__).resolve().parents[1] / "app" / "icons" / "toolbar"
+        icon_fg = QColor(theme.STUDIO_TOOLBAR_FOREGROUND)
 
         self._walk_action = None
-        if enable_walking_axis:
-            self._walk_action = self._toolbar.addAction("Walking axis")
-            self._walk_action.setCheckable(True)
-            self._walk_action.setToolTip("Keep a rolling time window on the X axis")
-            self._walk_action.toggled.connect(self._on_walk_toggled)
+
+        self._scope_action = self._toolbar.addAction("Scope")
+        self._scope_action.setIcon(
+            icon_from_tinted_svg_file(icons_dir / "labplot-xy-plot-four-axes.svg", icon_fg)
+        )
+        self._scope_action.setCheckable(True)
+        self._scope_action.setChecked(True)
+        self._scope_action.setToolTip("Show or hide the oscilloscope area")
+        self._scope_action.toggled.connect(self._on_scope_toggled)
 
         self._legend_action = self._toolbar.addAction("Legend")
+        self._legend_action.setIcon(icon_from_tinted_svg_file(icons_dir / "legend.svg", icon_fg))
         self._legend_action.setCheckable(True)
         self._legend_action.setChecked(True)
         self._legend_action.setToolTip("Show or hide the signal list (adjusts window width)")
         self._legend_action.toggled.connect(self._on_legend_panel_toggled)
 
         self._slider_action = self._toolbar.addAction("Slider")
+        self._slider_action.setIcon(icon_from_tinted_svg_file(icons_dir / "slider.svg", icon_fg))
         self._slider_action.setCheckable(True)
         self._slider_action.setToolTip("Show two vertical cursors (A/B); values appear in the legend columns")
         self._slider_action.toggled.connect(self._on_slider_toggled)
 
+        act_adjust = self._toolbar.addAction("Adjust")
+        act_adjust.setIcon(icon_from_tinted_svg_file(icons_dir / "adjust.svg", icon_fg))
+        act_adjust.setToolTip("Autoscale X/Y (PyLinX-style Ctrl+A)")
+        act_adjust.triggered.connect(self._on_adjust)
+        self._adjust_action = act_adjust
+
         act_clear = self._toolbar.addAction("Clear")
+        act_clear.setIcon(icon_from_tinted_svg_file(icons_dir / "clear.svg", icon_fg))
         act_clear.triggered.connect(self.clear_channels)
 
-        plot_column_lay.addWidget(self._toolbar)
+        if enable_walking_axis:
+            self._walk_action = self._toolbar.addAction("Walking axis")
+            self._walk_action.setCheckable(True)
+            self._walk_action.setToolTip("Keep a rolling time window on the X axis")
+            self._walk_action.toggled.connect(self._on_walk_toggled)
+
+        layout.addWidget(self._toolbar)
 
         self._scope = PixmapScopeWidget()
         self._scope.slider_positions_changed.connect(self._refresh_slider_legend_values)
@@ -137,26 +166,53 @@ class DataViewerWidget(QWidget):
         self._legend_table.setHorizontalHeaderLabels(
             ["Color", "Signal Name", "Unit", "Slider A", "Slider B", "Difference"]
         )
+        sig_hdr_item = self._legend_table.horizontalHeaderItem(1)
+        if sig_hdr_item is not None:
+            sig_hdr_item.setText("Signal Name\n")
+            sig_hdr_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self._legend_table.setAlternatingRowColors(True)
         self._legend_table.verticalHeader().setVisible(False)
         self._legend_table.setShowGrid(True)
+        self._legend_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._legend_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._legend_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         hdr = self._legend_table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # "Signal Name" stays manually resizable by drag.
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self._legend_table.setColumnWidth(0, 44)
+        self._legend_table.setColumnWidth(1, 180)
+        self._legend_table.setColumnWidth(2, 24)
+        self._legend_table.setColumnWidth(3, 80)
+        self._legend_table.setColumnWidth(4, 80)
+        self._legend_table.setColumnWidth(5, 90)
         self._legend_table.verticalHeader().setDefaultSectionSize(18)
+        self._legend_table.horizontalHeader().setStretchLastSection(True)
+        # Allow a second line in header for the "Skip Namespace" checkbox.
+        hdr.setFixedHeight(34)
+        hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._skip_namespace_cb = QCheckBox("Skip Namespace", hdr.viewport())
+        self._skip_namespace_cb.setChecked(False)
+        self._skip_namespace_cb.setStyleSheet(
+            "QCheckBox { color: #ffffff; background: transparent; spacing: 4px; font-size: 10px; }"
+            "QCheckBox::indicator { width: 10px; height: 10px; "
+            "border: 1px solid #d0d0d0; background: #2f2f2f; }"
+            "QCheckBox::indicator:checked { background: #586cd4; border: 1px solid #ffffff; }"
+        )
+        self._skip_namespace_cb.toggled.connect(self._apply_legend_name_display)
+        hdr.sectionResized.connect(lambda *_: self._position_skip_namespace_checkbox())
+        hdr.sectionMoved.connect(lambda *_: self._position_skip_namespace_checkbox())
+        QTimer.singleShot(0, self._position_skip_namespace_checkbox)
+        for col in (3, 4, 5):
+            self._legend_table.setColumnHidden(col, True)
         legend_lay.addWidget(self._legend_table)
 
         self._splitter.addWidget(plot_column)
         self._splitter.addWidget(self._legend_panel)
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 0)
-        self._splitter.setSizes([900, 400])
+        self._splitter.setSizes([700, 300])
+        self._splitter.splitterMoved.connect(lambda *_: self._enforce_splitter_bounds())
 
         layout.addWidget(self._splitter, 1)
 
@@ -171,10 +227,71 @@ class DataViewerWidget(QWidget):
         self._empty_hint.setStyleSheet("color: #888; background: transparent;")
         self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        # Keep startup splitter proportions; slider-column sizing runs when toggled.
 
     def resizeEvent(self, event) -> None:  # noqa: ANN001
         super().resizeEvent(event)
         self._position_hint()
+        self._position_skip_namespace_checkbox()
+        self._enforce_splitter_bounds()
+
+    def _enforce_splitter_bounds(self) -> None:
+        """Keep legend docked on the right and prevent oversizing beyond widget bounds."""
+        total = self._splitter.width()
+        if total <= 0:
+            return
+        if hasattr(self, "_scope_action") and not self._scope_action.isChecked():
+            self._splitter.setSizes([0, total])
+            return
+        sizes = self._splitter.sizes()
+        if len(sizes) < 2:
+            return
+        cur_legend = sizes[1]
+        max_by_total = max(self._min_legend_width, total - self._min_plot_width)
+        slider_on = hasattr(self, "_slider_action") and self._slider_action.isChecked()
+        if slider_on:
+            # In slider mode, legend may need extra width for A/B/Difference columns.
+            max_legend = max_by_total
+        else:
+            max_legend = min(self._max_legend_width, max_by_total)
+        if max_legend < self._min_legend_width:
+            max_legend = self._min_legend_width
+        clamped = max(self._min_legend_width, min(max_legend, cur_legend))
+        if clamped != cur_legend:
+            self._splitter.setSizes([max(self._min_plot_width, total - clamped), clamped])
+
+    def _position_skip_namespace_checkbox(self) -> None:
+        hdr = self._legend_table.horizontalHeader()
+        if not self._skip_namespace_cb.isVisible():
+            self._skip_namespace_cb.show()
+        sec = 1  # "Signal Name"
+        if sec >= self._legend_table.columnCount():
+            return
+        left = hdr.sectionViewportPosition(sec)
+        # Place checkbox on a second line under "Signal Name", left-aligned.
+        x = left + 6
+        cb_h = self._skip_namespace_cb.sizeHint().height()
+        y = max(14, hdr.viewport().height() - cb_h - 2)
+        self._skip_namespace_cb.move(x, y)
+        self._skip_namespace_cb.raise_()
+
+    def _display_signal_name(self, raw_name: str) -> str:
+        if not self._skip_namespace_cb.isChecked():
+            return raw_name
+        if "." not in raw_name:
+            return raw_name
+        # Hide optional namespace up to and including the LAST dot.
+        return raw_name.rsplit(".", 1)[1]
+
+    def _apply_legend_name_display(self) -> None:
+        for row in range(self._legend_table.rowCount()):
+            nm = self._legend_table.item(row, 1)
+            if nm is None:
+                continue
+            raw = nm.data(Qt.ItemDataRole.UserRole)
+            if isinstance(raw, str) and raw:
+                nm.setText(self._display_signal_name(raw))
+        self._position_skip_namespace_checkbox()
 
     def _position_hint(self) -> None:
         if self._empty_hint.isVisible():
@@ -190,6 +307,11 @@ class DataViewerWidget(QWidget):
         return p
 
     def _on_legend_panel_toggled(self, checked: bool) -> None:
+        if not checked and not self._scope_action.isChecked():
+            self._legend_action.blockSignals(True)
+            self._legend_action.setChecked(True)
+            self._legend_action.blockSignals(False)
+            return
         self._legend_visible = bool(checked)
         host = _find_mdi_subwindow(self)
         if host is not None:
@@ -213,12 +335,97 @@ class DataViewerWidget(QWidget):
             return
         self._legend_panel.setVisible(self._legend_visible)
 
+    def _on_scope_toggled(self, checked: bool) -> None:
+        if not checked and not self._legend_action.isChecked():
+            self._scope_action.blockSignals(True)
+            self._scope_action.setChecked(True)
+            self._scope_action.blockSignals(False)
+            return
+        show_scope = bool(checked)
+        self._scope.setVisible(show_scope)
+        self._adjust_action.setVisible(show_scope)
+        self._slider_action.setVisible(show_scope)
+
+        host = _find_mdi_subwindow(self)
+        if not show_scope:
+            # Collapse to legend-only mode and remember old overall width.
+            if host is not None:
+                self._scope_window_saved_width = host.geometry().width()
+                sizes = self._splitter.sizes()
+                scope_w = sizes[0] if len(sizes) > 0 else 0
+                new_w = max(host.minimumWidth(), self._scope_window_saved_width - max(0, scope_w))
+                host.setGeometry(host.x(), host.y(), new_w, host.height())
+            self._splitter.setSizes([0, max(self._min_legend_width, self._legend_panel.width())])
+            self._enforce_splitter_bounds()
+            return
+
+        # Restore normal splitter/window width when scope becomes visible again.
+        self._enforce_splitter_bounds()
+        if host is not None and self._scope_window_saved_width is not None:
+            host.setGeometry(
+                host.x(),
+                host.y(),
+                max(host.minimumWidth(), self._scope_window_saved_width),
+                host.height(),
+            )
+            self._scope_window_saved_width = None
+
     def _on_slider_toggled(self, on: bool) -> None:
         self._scope.set_sliders_visible(on)
+        self._set_slider_columns_visible(on)
         if not on:
             self._clear_slider_legend_cells()
         else:
             self._refresh_slider_legend_values()
+
+    def _set_slider_columns_visible(self, visible: bool) -> None:
+        prev_sizes = self._splitter.sizes()
+        current_legend_w = prev_sizes[1] if len(prev_sizes) > 1 else self._legend_panel.width()
+        for col in (3, 4, 5):
+            self._legend_table.setColumnHidden(col, not visible)
+        # Keep user-defined width for "Signal Name"; only auto-size non-name columns.
+        self._legend_table.resizeColumnToContents(0)
+        self._legend_table.setColumnWidth(2, 24)
+        if visible:
+            for col in (3, 4, 5):
+                self._legend_table.resizeColumnToContents(col)
+        legend_w = 0
+        visible_cols = [c for c in range(self._legend_table.columnCount()) if not self._legend_table.isColumnHidden(c)]
+        if 1 in visible_cols:
+            legend_w = (
+                self._legend_table.columnWidth(0)
+                + self._legend_table.columnWidth(1)
+                + self._legend_table.columnWidth(2)
+            )
+            if visible:
+                legend_w += (
+                    self._legend_table.columnWidth(3)
+                    + self._legend_table.columnWidth(4)
+                    + self._legend_table.columnWidth(5)
+                )
+        legend_w += 2 + self._legend_table.verticalScrollBar().sizeHint().width()
+        legend_w = max(260, legend_w)
+        if not visible:
+            legend_w = min(legend_w, self._max_legend_width)
+        self._legend_panel.setMinimumWidth(legend_w)
+        self._legend_panel.setMaximumWidth(16_777_215)
+        total_w = self._splitter.width()
+        # During early init splitter width can be tiny/zero; avoid collapsing scope.
+        if total_w > legend_w + 220:
+            self._splitter.setSizes([max(220, total_w - legend_w), legend_w])
+        self._enforce_splitter_bounds()
+
+        host = _find_mdi_subwindow(self)
+        if host is None:
+            return
+        if visible:
+            self._slider_cols_saved = max(0, legend_w - max(self._min_legend_width, current_legend_w))
+            g = host.geometry()
+            host.setGeometry(g.x(), g.y(), g.width() + self._slider_cols_saved, g.height())
+        else:
+            g = host.geometry()
+            nw = max(host.minimumWidth(), g.width() - self._slider_cols_saved)
+            host.setGeometry(g.x(), g.y(), nw, g.height())
 
     def _slider_x_positions(self) -> tuple[float | None, float | None]:
         return self._scope.slider_data_x_positions()
@@ -283,12 +490,27 @@ class DataViewerWidget(QWidget):
         row = self._legend_table.rowCount()
         self._legend_table.insertRow(row)
         c = pen.color()
-        sw = QTableWidgetItem()
-        sw.setFlags(Qt.ItemFlag.ItemIsEnabled)
-        sw.setBackground(QBrush(c))
-        sw.setToolTip(c.name(QColor.NameFormat.HexRgb))
-        self._legend_table.setItem(row, 0, sw)
-        nm = QTableWidgetItem(name)
+        # Color cell: full background in signal color, centered checkbox on top.
+        cell = QWidget()
+        cell.setStyleSheet(f"background-color: {c.name(QColor.NameFormat.HexRgb)};")
+        lay = QHBoxLayout(cell)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        cb = QCheckBox(cell)
+        cb.setToolTip("Highlight this signal")
+        lay.addStretch(1)
+        lay.addWidget(cb, alignment=Qt.AlignmentFlag.AlignCenter)
+        lay.addStretch(1)
+        self._legend_table.setCellWidget(row, 0, cell)
+
+        def _on_cb_toggled(checked: bool, chan: str = name) -> None:
+            self._set_channel_highlight(chan, checked)
+
+        cb.toggled.connect(_on_cb_toggled)
+
+        nm = QTableWidgetItem(self._display_signal_name(name))
+        nm.setData(Qt.ItemDataRole.UserRole, name)
+        nm.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         nm.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
         self._legend_table.setItem(row, 1, nm)
         unit_text = ""
@@ -320,6 +542,7 @@ class DataViewerWidget(QWidget):
     def _clear_legend_rows(self) -> None:
         self._legend_table.setRowCount(0)
         self._channel_legend_row.clear()
+        self._highlighted_channels.clear()
 
     def add_channel(self, name: str) -> None:
         if name in self._channel_pens:
@@ -337,6 +560,7 @@ class DataViewerWidget(QWidget):
         if name not in self._channel_pens:
             return
         self._channel_pens.pop(name, None)
+        self._highlighted_channels.discard(name)
         self._scope.remove_series(name)
         self._remove_legend_row(name)
         if self._slider_action.isChecked():
@@ -350,6 +574,7 @@ class DataViewerWidget(QWidget):
         self._scope.clear_series()
         self._color_index = 0
         self._clear_legend_rows()
+        self._highlighted_channels.clear()
         self._empty_hint.show()
         self._position_hint()
         if self._slider_action.isChecked():
@@ -399,6 +624,32 @@ class DataViewerWidget(QWidget):
                 self._refresh_slider_legend_values()
         else:
             self.set_channel_data(name, t_new, y_new)
+
+    def _set_channel_highlight(self, name: str, checked: bool) -> None:
+        """Highlight a channel: bold legend row + thicker pen."""
+        row = self._channel_legend_row.get(name)
+        if row is None:
+            return
+        if checked:
+            self._highlighted_channels.add(name)
+        else:
+            self._highlighted_channels.discard(name)
+
+        # Bold/unbold the entire row.
+        for col in range(self._legend_table.columnCount()):
+            item = self._legend_table.item(row, col)
+            if item is None:
+                continue
+            f = item.font()
+            f.setBold(checked)
+            item.setFont(f)
+
+        # Adjust pen width for the corresponding curve.
+        pen = self._channel_pens.get(name)
+        if pen is not None:
+            pen.setWidthF(4.0 if checked else 1.5)
+            # Re-render scope to apply new pen width.
+            self._scope.refresh_pixmap()
 
     def _on_adjust(self) -> None:
         self._scope.auto_range()

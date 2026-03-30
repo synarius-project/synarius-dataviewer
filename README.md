@@ -1,5 +1,7 @@
 # synarius-dataviewer
 
+![Synarius title image](docs/_static/synarius-title.png)
+
 Data viewing and inspection tooling built on **synarius-core** (no GUI in core; this package can add viewers, CLIs, or small UIs).
 
 **Repository:** [synarius-project/synarius-dataviewer](https://github.com/synarius-project/synarius-dataviewer)

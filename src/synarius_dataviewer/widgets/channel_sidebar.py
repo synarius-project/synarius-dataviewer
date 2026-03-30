@@ -6,6 +6,7 @@ from PySide6.QtCore import QByteArray, QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import QDrag, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -92,6 +93,7 @@ class ChannelSidebar(QWidget):
         self.setObjectName("ChannelPanel")
         self.setStyleSheet(channel_panel_stylesheet())
         self._bundle: TimeSeriesBundle | None = None
+        self._use_checks: list[QCheckBox] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -135,22 +137,23 @@ class ChannelSidebar(QWidget):
     def set_bundle(self, bundle: TimeSeriesBundle | None) -> None:
         self._bundle = bundle
         self._table.setRowCount(0)
+        self._use_checks = []
         if bundle is None:
             self.bundle_changed.emit(None)
             return
         names = sorted(bundle.channel_names(), key=str.lower)
         self._table.setRowCount(len(names))
         for row, name in enumerate(names):
-            use_item = QTableWidgetItem()
-            use_item.setFlags(
-                use_item.flags()
-                | Qt.ItemFlag.ItemIsUserCheckable
-                | Qt.ItemFlag.ItemIsEnabled
-                | Qt.ItemFlag.ItemIsSelectable
-            )
-            use_item.setCheckState(Qt.CheckState.Unchecked)
-            use_item.setText("")
-            self._table.setItem(row, 0, use_item)
+            use_cell = QWidget(self._table)
+            use_lay = QHBoxLayout(use_cell)
+            use_lay.setContentsMargins(0, 0, 0, 0)
+            use_lay.setSpacing(0)
+            cb = QCheckBox(use_cell)
+            use_lay.addStretch(1)
+            use_lay.addWidget(cb, alignment=Qt.AlignmentFlag.AlignCenter)
+            use_lay.addStretch(1)
+            self._table.setCellWidget(row, 0, use_cell)
+            self._use_checks.append(cb)
 
             name_item = QTableWidgetItem(name)
             name_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
@@ -184,26 +187,23 @@ class ChannelSidebar(QWidget):
         for r in range(self._table.rowCount()):
             if self._table.isRowHidden(r):
                 continue
-            it = self._table.item(r, 0)
-            if it is not None:
-                it.setCheckState(Qt.CheckState.Checked)
+            if r < len(self._use_checks):
+                self._use_checks[r].setChecked(True)
 
     def _clear_selection_visible(self) -> None:
         for r in range(self._table.rowCount()):
             if self._table.isRowHidden(r):
                 continue
-            it = self._table.item(r, 0)
-            if it is not None:
-                it.setCheckState(Qt.CheckState.Unchecked)
+            if r < len(self._use_checks):
+                self._use_checks[r].setChecked(False)
 
     def selected_channels(self) -> list[str]:
         out: list[str] = []
         for r in range(self._table.rowCount()):
-            it = self._table.item(r, 0)
             name_item = self._table.item(r, 1)
-            if it is None or name_item is None:
+            if name_item is None:
                 continue
-            if it.checkState() == Qt.CheckState.Checked:
+            if r < len(self._use_checks) and self._use_checks[r].isChecked():
                 out.append(name_item.text())
         return out
 

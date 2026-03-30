@@ -14,6 +14,7 @@ from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QCursor,
+    QFontMetrics,
     QPainter,
     QPen,
     QPixmap,
@@ -31,7 +32,7 @@ _POOL_MAX = 120_000
 _ZOOM_WHEEL_FACTOR = 0.86
 _AXIS_WHEEL_STRIP_PX = 44
 _SLIDER_LINE_WIDTH = 3
-_SLIDER_CIRCLE_R = 12
+_SLIDER_CIRCLE_R = 9
 
 
 class PixmapScopeWidget(QWidget):
@@ -41,10 +42,11 @@ class PixmapScopeWidget(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._margin_left = 50
-        self._margin_right = 50
-        self._margin_bottom = 50
-        self._margin_top = 10
+        self._margin_left = 12
+        # Slightly larger gap to the right widget edge.
+        self._margin_right = 24
+        self._margin_bottom = 40
+        self._margin_top = 28
         self._channels: OrderedDict[str, dict[str, object]] = OrderedDict()
         self.min_x = 0.0
         self.max_x = 1.0
@@ -70,7 +72,7 @@ class PixmapScopeWidget(QWidget):
         self._color_slider_b = QColor(255, 102, 255)
         self._pen_slider_a = QPen(self._color_slider_a, _SLIDER_LINE_WIDTH, Qt.PenStyle.SolidLine)
         self._pen_slider_a.setCosmetic(True)
-        self._pen_slider_b = QPen(self._color_slider_b, _SLIDER_LINE_WIDTH, Qt.PenStyle.DashLine)
+        self._pen_slider_b = QPen(self._color_slider_b, _SLIDER_LINE_WIDTH, Qt.PenStyle.SolidLine)
         self._pen_slider_b.setCosmetic(True)
 
         self._rubber_active = False
@@ -84,7 +86,7 @@ class PixmapScopeWidget(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        self.setStyleSheet("background-color: black;")
+        self.setStyleSheet("background-color: #2f2f2f;")
         self.setAutoFillBackground(True)
 
     def minimumSizeHint(self) -> QSize:
@@ -170,6 +172,44 @@ class PixmapScopeWidget(QWidget):
         if hi_v <= lo_v:
             hi_v = lo_v + 1e-9 * max(1.0, abs(lo_v))
         return lo_v, hi_v
+
+    @staticmethod
+    def _nice_ticks(
+        vmin: float,
+        vmax: float,
+        n: int,
+    ) -> tuple[float, float, int]:
+        """Return (start, step, count) for 'nice' tick values covering [vmin, vmax]."""
+        if not (math.isfinite(vmin) and math.isfinite(vmax)) or vmax <= vmin:
+            return 0.0, 1.0, 2
+        span = vmax - vmin
+        raw_step = span / max(n, 1)
+        if raw_step <= 0:
+            raw_step = 1.0
+        exp = math.floor(math.log10(raw_step))
+        base = 10**exp
+        for m in (1.0, 2.0, 5.0, 10.0):
+            step = m * base
+            if step >= raw_step * 0.999:
+                break
+        start = math.floor(vmin / step) * step
+        count = int(math.floor((vmax - start) / step) + 1)
+        count = max(count, 2)
+        return start, step, count
+
+    def _update_left_margin_for_labels(self) -> None:
+        """Ensure left margin is wide enough so Y-axis labels are fully visible."""
+        fm = QFontMetrics(self.font())
+        y0, ystep, ny = self._nice_ticks(self.min_y, self.max_y, self._num_yticks)
+        max_w = 0
+        for j in range(ny):
+            yv = y0 + j * ystep
+            text = f"{yv:.6g}"
+            max_w = max(max_w, fm.horizontalAdvance(text))
+        # Keep labels visible and avoid touching/overlapping the plot border.
+        needed = max(26, max_w + 8)
+        if needed > self._margin_left:
+            self._margin_left = needed
 
     def _median_channel_t_end(self) -> float | None:
         ends: list[float] = []
@@ -355,8 +395,17 @@ class PixmapScopeWidget(QWidget):
 
     def _slider_circle_rect(self, line_x: int, rect: QRect) -> QRect:
         r = _SLIDER_CIRCLE_R
-        cy = rect.top() - r - 5
+        # Kreis soll die obere Plot-Grenze tangieren: Unterkante auf rect.top().
+        cy = rect.top() - r
         return QRect(line_x - r, cy - r, 2 * r + 1, 2 * r + 1)
+
+    def _slider_hit_column_rect(self, line_x: int, rect: QRect) -> QRect:
+        """Widened hit area around a slider line for easier dragging."""
+        r = _SLIDER_CIRCLE_R
+        pad_x = 4
+        top = rect.top() - 2 * r
+        height = rect.height() + 2 * r
+        return QRect(line_x - r - pad_x, top, 2 * r + 1 + 2 * pad_x, height)
 
     def _sync_slider_hit_rects(self) -> None:
         if not self.checkslider:
@@ -366,8 +415,8 @@ class PixmapScopeWidget(QWidget):
         r = self._data_rect()
         if r.width() < 10:
             return
-        self._slider_hit_a = self._slider_circle_rect(self.line_a, r)
-        self._slider_hit_b = self._slider_circle_rect(self.line_b, r)
+        self._slider_hit_a = self._slider_hit_column_rect(self.line_a, r)
+        self._slider_hit_b = self._slider_hit_column_rect(self.line_b, r)
 
     def showEvent(self, event) -> None:  # noqa: ANN001
         super().showEvent(event)
@@ -399,8 +448,11 @@ class PixmapScopeWidget(QWidget):
     def refresh_pixmap(self) -> None:
         w = max(1, self.width())
         h = max(1, self.height())
+        # Adjust left margin so Y labels fit before drawing.
+        self._update_left_margin_for_labels()
         self._pixmap = QPixmap(w, h)
-        self._pixmap.fill(QColor(0, 0, 0))
+        # Widget background (outside plot) stays dark gray.
+        self._pixmap.fill(QColor(47, 47, 47))
         painter = QPainter(self._pixmap)
         try:
             self._draw_all(painter)
@@ -409,9 +461,12 @@ class PixmapScopeWidget(QWidget):
         self.update()
 
     def _draw_all(self, painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = self._data_rect()
         if not rect.isValid() or rect.width() < 2 or rect.height() < 2:
             return
+        # Keep black only inside the actual oscilloscope plot area.
+        painter.fillRect(rect, QColor(0, 0, 0))
         self._draw_grid(painter, rect)
         painter.setPen(self._pen_axis)
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -428,28 +483,67 @@ class PixmapScopeWidget(QWidget):
         span_y = float(self.max_y - self.min_y)
         if not (math.isfinite(span_x) and math.isfinite(span_y)) or span_x <= 0 or span_y <= 0:
             return
-        for i in range(self._num_xticks + 1):
-            xf = rect.left() + i * (rect.width() - 1) / max(self._num_xticks, 1)
-            xi = int(round(xf))
-            painter.drawLine(xi, rect.top(), xi, rect.bottom())
-        for j in range(self._num_yticks + 1):
-            yf = rect.bottom() - j * (rect.height() - 1) / max(self._num_yticks, 1)
-            yi = int(round(yf))
-            painter.drawLine(rect.left(), yi, rect.right(), yi)
+        # Compute "nice" tick values for both axes
+        x0, xstep, nx = self._nice_ticks(self.min_x, self.max_x, self._num_xticks)
+        y0, ystep, ny = self._nice_ticks(self.min_y, self.max_y, self._num_yticks)
+
+        # Store main tick positions for secondary (fine) grid
+        x_ticks: list[float] = []
+        for i in range(nx):
+            xv = x0 + i * xstep
+            rx = (xv - self.min_x) / span_x
+            if 0.0 <= rx <= 1.0:
+                xf = rect.left() + rx * (rect.width() - 1)
+                xi = int(round(xf))
+                painter.drawLine(xi, rect.top(), xi, rect.bottom())
+                x_ticks.append(xv)
+        y_ticks: list[float] = []
+        for j in range(ny):
+            yv = y0 + j * ystep
+            ry = (yv - self.min_y) / span_y
+            if 0.0 <= ry <= 1.0:
+                yf = rect.bottom() - ry * (rect.height() - 1)
+                yi = int(round(yf))
+                painter.drawLine(rect.left(), yi, rect.right(), yi)
+
+                y_ticks.append(yv)
+
+        # Secondary finer grid (dotted), no labels
+        fine_pen = QPen(QColor(90, 90, 90), 1, Qt.PenStyle.DotLine)
+        painter.setPen(fine_pen)
+        for i in range(len(x_ticks) - 1):
+            xv = 0.5 * (x_ticks[i] + x_ticks[i + 1])
+            rx = (xv - self.min_x) / span_x
+            if 0.0 <= rx <= 1.0:
+                xf = rect.left() + rx * (rect.width() - 1)
+                xi = int(round(xf))
+                painter.drawLine(xi, rect.top(), xi, rect.bottom())
+        for j in range(len(y_ticks) - 1):
+            yv = 0.5 * (y_ticks[j] + y_ticks[j + 1])
+            ry = (yv - self.min_y) / span_y
+            if 0.0 <= ry <= 1.0:
+                yf = rect.bottom() - ry * (rect.height() - 1)
+                yi = int(round(yf))
+                painter.drawLine(rect.left(), yi, rect.right(), yi)
+
         painter.setPen(QColor(224, 224, 224))
         painter.setFont(self.font())
-        for i in range(self._num_xticks + 1):
-            xf = rect.left() + i * (rect.width() - 1) / max(self._num_xticks, 1)
-            xi = int(round(xf))
-            label = float(self.min_x) + i * span_x / max(self._num_xticks, 1)
-            ax = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
-            painter.drawText(xi - 40, rect.bottom() + 4, 80, 18, ax, f"{label:.4g}")
-        for j in range(self._num_yticks + 1):
-            yf = rect.bottom() - j * (rect.height() - 1) / max(self._num_yticks, 1)
-            yi = int(round(yf))
-            label = float(self.min_y) + j * span_y / max(self._num_yticks, 1)
-            ay = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            painter.drawText(4, yi - 10, self._margin_left - 8, 20, ay, f"{label:.4g}")
+        for i in range(nx):
+            xv = x0 + i * xstep
+            rx = (xv - self.min_x) / span_x
+            if 0.0 <= rx <= 1.0:
+                xf = rect.left() + rx * (rect.width() - 1)
+                xi = int(round(xf))
+                ax = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
+                painter.drawText(xi - 40, rect.bottom() + 4, 80, 18, ax, f"{xv:.6g}")
+        for j in range(ny):
+            yv = y0 + j * ystep
+            ry = (yv - self.min_y) / span_y
+            if 0.0 <= ry <= 1.0:
+                yf = rect.bottom() - ry * (rect.height() - 1)
+                yi = int(round(yf))
+                ay = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                painter.drawText(2, yi - 10, self._margin_left - 6, 20, ay, f"{yv:.6g}")
 
     def _draw_sliders(self, painter: QPainter, rect: QRect) -> None:
         la, lb = int(self.line_a), int(self.line_b)
@@ -462,9 +556,15 @@ class PixmapScopeWidget(QWidget):
 
         ra = self._slider_circle_rect(la, rect)
         rb = self._slider_circle_rect(lb, rect)
-        painter.setPen(self._pen_slider_a)
+
+        # Filled circles without outline for A/B
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(self._color_slider_a)
         painter.drawEllipse(ra)
+        painter.setBrush(self._color_slider_b)
+        painter.drawEllipse(rb)
+
+        # Text labels A/B on top
         painter.setPen(QPen(QColor(40, 30, 0), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawText(
@@ -472,11 +572,7 @@ class PixmapScopeWidget(QWidget):
             Qt.AlignmentFlag.AlignCenter,
             "A",
         )
-        painter.setPen(self._pen_slider_b)
-        painter.setBrush(self._color_slider_b)
-        painter.drawEllipse(rb)
         painter.setPen(QPen(QColor(60, 0, 60), 1))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawText(rb, Qt.AlignmentFlag.AlignCenter, "B")
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
@@ -562,8 +658,10 @@ class PixmapScopeWidget(QWidget):
             return
         span_x = float(self.max_x - self.min_x)
         span_y = float(self.max_y - self.min_y)
-        step_x = span_x / max(self._num_xticks, 1)
-        step_y = span_y / max(self._num_yticks, 1)
+        x0, xstep, _ = self._nice_ticks(self.min_x, self.max_x, self._num_xticks)
+        y0, ystep, _ = self._nice_ticks(self.min_y, self.max_y, self._num_yticks)
+        step_x = xstep
+        step_y = ystep
         ticks = delta_y / 120.0
         if horizontal:
             self.min_x -= ticks * step_x
@@ -650,7 +748,13 @@ class PixmapScopeWidget(QWidget):
             event.accept()
             return
         zoom_in = dy > 0
-        if mods & Qt.KeyboardModifier.ControlModifier:
+        if (mods == Qt.KeyboardModifier.NoModifier) and self._in_y_axis_strip(pos):
+            self._zoom_at_cursor(pos, zoom_in=zoom_in, mode="y")
+            self.refresh_pixmap()
+        elif (mods == Qt.KeyboardModifier.NoModifier) and self._in_x_axis_strip(pos):
+            self._zoom_at_cursor(pos, zoom_in=zoom_in, mode="x")
+            self.refresh_pixmap()
+        elif mods & Qt.KeyboardModifier.ControlModifier:
             if self._in_y_axis_strip(pos):
                 self._zoom_at_cursor(pos, zoom_in=zoom_in, mode="y")
             elif self._in_x_axis_strip(pos):
@@ -670,8 +774,38 @@ class PixmapScopeWidget(QWidget):
         pos = event.position().toPoint()
         r = self._data_rect()
 
+        # Slider: linke Maustaste hat Priorität – wenn auf A/B geklickt wird,
+        # wird NICHT gepannt.
+        if self.checkslider and event.button() == Qt.MouseButton.LeftButton:
+            if self._slider_hit_a.contains(pos):
+                self.flag_a = False
+                self.flag_b = True
+                x = int(pos.x())
+                x = max(r.left() + 2, min(r.right() - 2, x))
+                if self.line_b - x <= 8:
+                    x = self.line_b - 8
+                self.line_a = x
+                self._sync_slider_hit_rects()
+                self.refresh_pixmap()
+                self.slider_positions_changed.emit()
+                event.accept()
+                return
+            if self._slider_hit_b.contains(pos):
+                self.flag_b = False
+                self.flag_a = True
+                x = int(pos.x())
+                x = max(r.left() + 2, min(r.right() - 2, x))
+                if x - self.line_a <= 8:
+                    x = self.line_a + 8
+                self.line_b = x
+                self._sync_slider_hit_rects()
+                self.refresh_pixmap()
+                self.slider_positions_changed.emit()
+                event.accept()
+                return
+
         if (
-            event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton)
+            event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.LeftButton)
             and r.contains(pos)
         ):
             self._panning = True
@@ -680,19 +814,7 @@ class PixmapScopeWidget(QWidget):
             event.accept()
             return
 
-        if self.checkslider and event.button() == Qt.MouseButton.LeftButton:
-            if self._slider_hit_a.contains(pos):
-                self.flag_a = False
-                self.flag_b = True
-                event.accept()
-                return
-            if self._slider_hit_b.contains(pos):
-                self.flag_b = False
-                self.flag_a = True
-                event.accept()
-                return
-
-        if event.button() == Qt.MouseButton.LeftButton and r.contains(pos):
+        if event.button() == Qt.MouseButton.RightButton and r.contains(pos):
             self._rubber_active = True
             self._rubber_rect = QRect(pos, QSize(0, 0))
             self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
@@ -704,7 +826,7 @@ class PixmapScopeWidget(QWidget):
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: ANN001
         if (
-            event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton)
+            event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.LeftButton)
             and self._panning
         ):
             self._panning = False
@@ -713,7 +835,7 @@ class PixmapScopeWidget(QWidget):
             event.accept()
             return
 
-        if event.button() == Qt.MouseButton.LeftButton and self._rubber_active:
+        if event.button() == Qt.MouseButton.RightButton and self._rubber_active:
             self._rubber_active = False
             self.unsetCursor()
             self._apply_rubber_zoom()
@@ -734,7 +856,7 @@ class PixmapScopeWidget(QWidget):
 
         if self._panning and self._pan_last is not None and (
             event.buttons()
-            & (Qt.MouseButton.MiddleButton | Qt.MouseButton.RightButton)
+            & (Qt.MouseButton.MiddleButton | Qt.MouseButton.LeftButton)
         ):
             d = pos - self._pan_last
             self._apply_pan_pixels(d.x(), d.y())
@@ -743,7 +865,7 @@ class PixmapScopeWidget(QWidget):
             event.accept()
             return
 
-        if self._rubber_active and (event.buttons() & Qt.MouseButton.LeftButton):
+        if self._rubber_active and (event.buttons() & Qt.MouseButton.RightButton):
             tl = self._rubber_rect.topLeft()
             self._rubber_rect = QRect(tl, pos).normalized()
             self.update()
@@ -770,5 +892,17 @@ class PixmapScopeWidget(QWidget):
                 self.slider_positions_changed.emit()
             event.accept()
             return
+
+        if (
+            not self._panning
+            and not self._rubber_active
+            and not (self.checkslider and (event.buttons() & Qt.MouseButton.LeftButton))
+        ):
+            if self._in_x_axis_strip(pos):
+                self.setCursor(QCursor(Qt.CursorShape.SizeHorCursor))
+            elif self._in_y_axis_strip(pos):
+                self.setCursor(QCursor(Qt.CursorShape.SizeVerCursor))
+            else:
+                self.unsetCursor()
 
         super().mouseMoveEvent(event)

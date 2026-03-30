@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import numpy as np
+from pathlib import Path
+
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QMainWindow, QMdiArea, QMdiSubWindow, QMessageBox, QSplitter
 
 from synarius_dataviewer._version import __version__
@@ -18,6 +20,9 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"Synarius Dataviewer {__version__}")
+        # Use shared Synarius icon for all Dataviewer windows (relative to package).
+        icon_path = Path(__file__).resolve().parent / "icons" / "synarius64.png"
+        self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1280, 720)
         self._bundle: TimeSeriesBundle | None = None
 
@@ -103,8 +108,11 @@ class MainWindow(QMainWindow):
         shell.viewer.channel_drop_requested.connect(self._on_channel_drop_unknown)
         sub = QMdiSubWindow(self._mdi)
         sub.setWidget(shell)
+        sub.resize(900, 480)
         idx = len(self._mdi.subWindowList()) + 1
         sub.setWindowTitle(f"Data viewer {idx}")
+        # Inherit application icon for each data viewer subwindow.
+        sub.setWindowIcon(self.windowIcon())
         sub.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self._mdi.addSubWindow(sub)
         sub.show()
