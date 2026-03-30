@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 24 24"
+   width="24"
+   height="24"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="mult.svg"
+   inkscape:version="1.3.2 (091e20e, 2023-11-25, custom)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="11.976621"
+     inkscape:cx="3.0893521"
+     inkscape:cy="11.564197"
+     inkscape:window-width="1920"
+     inkscape:window-height="1009"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="g1"
+     showguides="true">
+    <sodipodi:guide
+       position="11.522449,17.487312"
+       orientation="1,0"
+       id="guide2"
+       inkscape:locked="false" />
+  </sodipodi:namedview>
+  <defs
+     id="defs3051">
+    <style
+       type="text/css"
+       id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#232629;
+      }
+      </style>
+  </defs>
+  <g
+     transform="translate(1,1)"
+     id="g1">
+    <path
+       style="fill:currentColor;fill-opacity:1;stroke:none;stroke-width:1.58144"
+       d="M 9.3507775,11.764991 3.1611792,5.575393 4.5753929,4.161179 l 6.1895981,6.189599 0.88423,0.884229 6.1896,6.1896 -1.414212,1.414212 -6.189601,-6.189598 z"
+       class="ColorScheme-Text"
+       id="path2"
+       sodipodi:nodetypes="ccccccccc" />
+    <path
+       style="fill:currentColor;fill-opacity:1;stroke:none;stroke-width:1.58144"
+       d="m 11.649223,11.764991 6.189598,-6.1895983 -1.414214,-1.4142135 -6.189598,6.1895988 -0.8842298,0.884229 -6.1896,6.1896 1.414212,1.414212 6.1896008,-6.189598 z"
+       class="ColorScheme-Text"
+       id="path3"
+       sodipodi:nodetypes="ccccccccc" />
+  </g>
+</svg>

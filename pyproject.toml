@@ -15,6 +15,8 @@ classifiers = [
   "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
 ]
 dependencies = [
+  # Core uses SQLAlchemy; declare here so a local PYTHONPATH + editable apps install still resolves it.
+  "SQLAlchemy>=2.0.0",
   # Time-series loaders live in synarius_core.io (install core with .[timeseries] when using core alone).
   "synarius-core @ git+https://github.com/synarius-project/synarius-core.git@8aaf0632f95d1b99c427de4b8efc145f19944604",
   "PySide6>=6.5.0",

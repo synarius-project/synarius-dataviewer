@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Apps / Dataviewer (Run)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "synarius_dataviewer",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src;${workspaceFolder}/../synarius-core/src"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "stopOnEntry": false
+    },
+    {
+      "name": "Apps / Dataviewer (Debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "synarius_dataviewer",
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src;${workspaceFolder}/../synarius-core/src"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
