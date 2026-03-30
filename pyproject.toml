@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "synarius-dataviewer"
+name = "synarius-apps"
 version = "0.0.1"
-description = "Data viewing and inspection tools for Synarius (built on synarius-core)."
+description = "Synarius applications and shared tools (Dataviewer, synariustools plot widget; built on synarius-core)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -15,8 +15,8 @@ classifiers = [
   "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
 ]
 dependencies = [
-  # Same pin strategy as synarius-studio for reproducible CI/installer builds.
-  "synarius-core @ git+https://github.com/synarius-project/synarius-core.git@42aa0cac5c695896c0fb01dec92a4e5ed1a2cf1e",
+  # Time-series loaders live in synarius_core.io (install core with .[timeseries] when using core alone).
+  "synarius-core @ git+https://github.com/synarius-project/synarius-core.git@8aaf0632f95d1b99c427de4b8efc145f19944604",
   "PySide6>=6.5.0",
   "pandas>=2.0.0",
   "pyarrow>=14.0.0",
@@ -28,14 +28,14 @@ dependencies = [
 synarius-dataviewer = "synarius_dataviewer.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/synarius-project/synarius-dataviewer"
+Homepage = "https://github.com/synarius-project/synarius-apps"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["synarius_dataviewer*"]
+include = ["synarius_dataviewer*", "synariustools*"]
 
 [tool.pyright]
 extraPaths = ["../synarius-core/src"]

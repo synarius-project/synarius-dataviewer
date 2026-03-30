@@ -19,11 +19,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from synarius_core.io import TimeSeriesBundle, load_timeseries_file
 
 from synarius_dataviewer.app.theme import channel_panel_stylesheet
-from synarius_dataviewer.io.timeseries_io import TimeSeriesBundle, load_timeseries_file
-
-MIME_CHANNEL = "application/x-synarius-dataviewer-channel"
+from synariustools.tools.plotwidget.mime import MIME_CHANNEL
 
 
 class _ChannelTableWidget(QTableWidget):

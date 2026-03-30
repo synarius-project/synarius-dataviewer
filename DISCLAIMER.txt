@@ -1,13 +1,13 @@
-SYNARIUS DATAVIEWER
+SYNARIUS APPS (DATAVIEWER)
 License Agreement and Disclaimer
 
 IMPORTANT: PLEASE READ THIS AGREEMENT CAREFULLY BEFORE INSTALLING OR USING THE SOFTWARE.
 
-By installing, copying, or otherwise using Synarius Dataviewer ("the Software"), you agree to be bound by the terms of this agreement.
+By installing, copying, or otherwise using Synarius Apps — including the Synarius Dataviewer application and related components ("the Software"), you agree to be bound by the terms of this agreement.
 
 License
 
-Synarius Dataviewer is licensed under the Mozilla Public License 2.0 (MPL 2.0).
+The Software is licensed under the Mozilla Public License 2.0 (MPL 2.0).
 
 You may use, modify, and distribute the Software in accordance with the terms of the MPL 2.0.
 A copy of the license is provided with this distribution.
@@ -31,7 +31,7 @@ the inability to use the Software
 any results produced by the Software
 Intended Use
 
-Synarius Dataviewer is intended for data inspection, development, and engineering support purposes.
+Synarius Apps (Dataviewer) is intended for data inspection, development, and engineering support purposes.
 
 The Software is not designed, certified, or intended for use in safety-critical systems, including but not limited to:
 

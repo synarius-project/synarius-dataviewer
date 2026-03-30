@@ -1,5 +1,5 @@
-synarius-dataviewer documentation
-=================================
+Synarius Apps documentation
+=============================
 
 .. image:: _static/synarius-title.png
    :alt: Synarius project title image

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import numpy as np
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QMainWindow, QMdiArea, QMdiSubWindow, QMessageBox, QSplitter
+from synarius_core.io import TimeSeriesBundle
 
 from synarius_dataviewer._version import __version__
 from synarius_dataviewer.app import theme
-from synarius_dataviewer.io.timeseries_io import TimeSeriesBundle
 from synarius_dataviewer.widgets.channel_sidebar import ChannelSidebar
 from synarius_dataviewer.widgets.data_viewer import DataViewerShell
 
@@ -19,7 +19,7 @@ from synarius_dataviewer.widgets.data_viewer import DataViewerShell
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle(f"Synarius Dataviewer {__version__}")
+        self.setWindowTitle(f"Synarius Apps — Dataviewer {__version__}")
         # Use shared Synarius icon for all Dataviewer windows (relative to package).
         icon_path = Path(__file__).resolve().parent / "icons" / "synarius64.png"
         self.setWindowIcon(QIcon(str(icon_path)))
