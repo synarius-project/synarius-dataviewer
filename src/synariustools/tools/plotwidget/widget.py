@@ -12,9 +12,11 @@ from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, Q
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QMdiSubWindow,
     QSplitter,
     QTableWidget,
@@ -44,6 +46,7 @@ from synariustools.tools.plotwidget.series_math import (
     latest_y,
 )
 from synariustools.tools.plotwidget.svg_icons import icon_from_tinted_svg_file
+from synarius_core.recording import export_recording_buffers
 
 
 def _find_window_host(widget: QWidget) -> QWidget | None:
@@ -64,6 +67,7 @@ class DataViewerWidget(QWidget):
     """Multi-channel plot: toolbar, :class:`PixmapScopeWidget`, optional legend table."""
 
     channel_drop_requested = Signal(str)
+    recording_saved = Signal(str)
 
     def __init__(
         self,
@@ -86,6 +90,9 @@ class DataViewerWidget(QWidget):
         self._slider_cols_saved = 240
         self._highlighted_channels: set[str] = set()
         self._scope_window_saved_width: int | None = None
+        self._save_last_dir: Path | None = None
+        self._save_last_basename: str | None = None
+        self._save_last_format: str = "mdf"
 
         self._min_plot_width = self._mode_cfg.min_plot_width
         self._min_legend_width = self._mode_cfg.min_legend_width
@@ -139,6 +146,21 @@ class DataViewerWidget(QWidget):
         act_adjust.setToolTip("Autoscale X/Y (Ctrl+A)")
         act_adjust.triggered.connect(self._on_adjust)
         self._adjust_action = act_adjust
+
+        act_save = self._toolbar.addAction("Save")
+        studio_save_icon = (
+            Path(__file__).resolve().parents[5]
+            / "synarius-studio"
+            / "src"
+            / "synarius_studio"
+            / "icons"
+            / "document-save-symbolic.svg"
+        )
+        if studio_save_icon.exists():
+            act_save.setIcon(icon_from_tinted_svg_file(studio_save_icon, icon_fg))
+        act_save.setToolTip("Save visible channels")
+        act_save.triggered.connect(self._on_save_visible_channels)
+        self._save_action = act_save
 
         if self._mode_cfg.show_clear_action:
             act_clear = self._toolbar.addAction("Clear")
@@ -680,6 +702,80 @@ class DataViewerWidget(QWidget):
         if self._walk_action is None:
             return
         self._scope.set_walking_axis(on, self._walk_span)
+
+    def _default_save_dir(self) -> Path:
+        if self._save_last_dir is not None and self._save_last_dir.is_dir():
+            return self._save_last_dir
+        return Path.home()
+
+    def _next_save_filename(self) -> Path:
+        ext = ".mf4" if self._save_last_format == "mdf" else ".parquet" if self._save_last_format == "parquet" else ".csv"
+        stem = self._save_last_basename or "measurement"
+        base_dir = self._default_save_dir()
+        candidate = base_dir / f"{stem}{ext}"
+        if not candidate.exists():
+            return candidate
+        idx = 1
+        while True:
+            candidate = base_dir / f"{stem}_{idx}{ext}"
+            if not candidate.exists():
+                return candidate
+            idx += 1
+
+    def _on_save_visible_channels(self) -> None:
+        series_buffers: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        for name in self._registry.names():
+            pair = self._scope.get_series(name)
+            if pair is None:
+                continue
+            tx, ty = pair
+            if len(tx) == 0:
+                continue
+            series_buffers[name] = (tx, ty)
+        if not series_buffers:
+            QMessageBox.information(self, "Save recording", "No visible channels to save.")
+            return
+
+        suggested = self._next_save_filename()
+        filters = "MDF files (*.mdf *.mf4 *.dat);;Parquet files (*.parquet *.pq);;CSV files (*.csv)"
+        selected_filter = (
+            "Parquet files (*.parquet *.pq)"
+            if self._save_last_format == "parquet"
+            else "CSV files (*.csv)"
+            if self._save_last_format == "csv"
+            else "MDF files (*.mdf *.mf4 *.dat)"
+        )
+        path_str, chosen_filter = QFileDialog.getSaveFileName(
+            self,
+            "Save recording",
+            str(suggested),
+            filters,
+            selected_filter,
+        )
+        if not path_str:
+            return
+
+        out_path = Path(path_str)
+        self._save_last_dir = out_path.parent
+        self._save_last_basename = out_path.stem
+        suf = out_path.suffix.lower()
+        if "parquet" in chosen_filter or suf in (".parquet", ".pq"):
+            self._save_last_format = "parquet"
+        elif "csv" in chosen_filter or suf == ".csv":
+            self._save_last_format = "csv"
+        else:
+            self._save_last_format = "mdf"
+
+        try:
+            export_recording_buffers(series_buffers, out_path, fmt=self._save_last_format)
+            effective_path = out_path
+            if self._save_last_format == "mdf" and not effective_path.is_file():
+                alt = effective_path.with_suffix(".mf4")
+                if alt.is_file():
+                    effective_path = alt
+            self.recording_saved.emit(str(effective_path))
+        except Exception as exc:
+            QMessageBox.warning(self, "Save recording", f"Could not save recording:\n{exc}")
 
     def _mime_names(self, md: QMimeData) -> list[str]:
         names: list[str] = []
