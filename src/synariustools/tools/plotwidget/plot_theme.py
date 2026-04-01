@@ -28,6 +28,10 @@ STUDIO_TOOLBAR_ACTIVE_ACTION_BACKGROUND = "#586cd4"
 STUDIO_TOOLBAR_ACTION_HOVER = _rgb_hex_scale(STUDIO_TOOLBAR_ACTIVE_ACTION_BACKGROUND, 0.40)
 STUDIO_TOOLBAR_ACTION_PRESSED = _rgb_hex_scale(STUDIO_TOOLBAR_ACTIVE_ACTION_BACKGROUND, 0.72)
 
+# Legend table: signal row text (name column = QLabel; other cols = QTableWidgetItem).
+DATAVIEWER_LEGEND_SIGNAL_TEXT = "#000000"
+DATAVIEWER_LEGEND_SIGNAL_HIDDEN_TEXT = "#8a8a8a"
+
 
 def studio_toolbar_stylesheet() -> str:
     bg = STUDIO_TOOLBAR_BACKGROUND
@@ -63,7 +67,7 @@ def _scoped_channel_grid_table_qss(scope: str) -> str:
         f"{scope} QTableWidget {{"
         f" background-color: {bg};"
         f" alternate-background-color: {alt};"
-        f" color: #1a1a1a;"
+        f" color: {DATAVIEWER_LEGEND_SIGNAL_TEXT};"
         f" gridline-color: transparent;"
         f" border: none;"
         f" font-size: 11px;"

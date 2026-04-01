@@ -2,17 +2,24 @@
 
 ![Synarius title image](docs/_static/synarius-title.png)
 
-Repository **synarius-apps** ships **Synarius Dataviewer** (MDI data inspection UI) plus shared GUI building blocks under **`synariustools`** (reusable Qt scope/legend plot widget). Everything builds on **synarius-core**.
+**synarius-apps** bundles the **Synarius DataViewer** (MDI desktop app for inspecting time-series and measurements) and shared Qt UI pieces under **`synariustools`**, especially the reusable scope/legend plot widget. It depends on **[synarius-core](https://github.com/synarius-project/synarius-core)**.
 
-**Repository:** [synarius-project/synarius-apps](https://github.com/synarius-project/synarius-apps)
+| | |
+|--|--|
+| **Repository** | [synarius-project/synarius-apps](https://github.com/synarius-project/synarius-apps) |
+| **PyPI-style name** | `synarius-apps` (see `pyproject.toml`) |
 
-**Python distribution** (install name from `pyproject.toml`): `synarius-apps`
+**Note (Windows checkout):** If a junction `synarius-apps` still points at a folder named `synarius-dataviewer`, that layout is fine. To rename the directory in place: close tools using it, remove only the junction (`rmdir synarius-apps`), then rename the real folder to `synarius-apps`.
 
-**Note (local checkout):** If Windows still has a folder named `synarius-dataviewer`, you can work through a junction `synarius-apps` that points to it (standard in this workspace until nothing locks the path). For a **physical** rename: close IDEs and terminals using that folder, remove the junction (`rmdir synarius-apps` — only removes the link), then rename the directory to `synarius-apps`.
+## Synarius DataViewer
+
+![Synarius DataViewer — oscilloscope, toolbar, and signal legend](docs/images/DataViewer.png)
+
+The **Synarius DataViewer** is a PySide6 application for exploring **multi-channel time-series**: an **oscilloscope-style plot** (zoom, pan, rubber-band zoom, optional walking time window), a **legend** with per-channel visibility, live values, and optional **A/B cursors**, plus **drag-and-drop** (or programmatic) channel loading. The same plot stack is used when **Synarius Studio** opens a live viewer for a diagram **DataViewer** block. Implementation lives in `src/synarius_dataviewer/` and `src/synariustools/tools/plotwidget/`; run it with the console entry point **`synarius-dataviewer`**.
 
 ## Install (development)
 
-**CI / clones** resolve `synarius-core` via the Git URL pinned in `pyproject.toml`. Measurement file I/O is implemented in **synarius-core** (`synarius_core.io`); this app still declares `pandas` / `pyarrow` / `asammdf` / `numpy` so installers resolve one consistent stack.
+**CI / clones** resolve `synarius-core` via the Git URL pinned in `pyproject.toml`. Measurement file I/O is implemented in **synarius-core** (`synarius_core.io`); this package still declares `pandas` / `pyarrow` / `asammdf` / `numpy` so installers resolve one consistent stack.
 
 ```bash
 pip install -e .
@@ -27,7 +34,7 @@ cd ../synarius-apps && pip install -e .
 
 If `pip` reports a conflict between the pinned Git revision of `synarius-core` and your local editable core, install the app with `pip install -e . --no-deps` after `pip install -e "../synarius-core[timeseries]"`, then add missing deps manually.
 
-Console entry point for the Dataviewer application (unchanged name for compatibility):
+Console entry point (name kept for compatibility):
 
 ```bash
 synarius-dataviewer
@@ -56,7 +63,7 @@ git push origin v0.0.1
 - `synarius_dataviewer.spec` — PyInstaller one-file spec for the Windows installer job
 - `DISCLAIMER.txt` — license text shown in the MSI
 
-### Plot widget (standalone-style)
+### Plot widget (embedded use)
 
 ```python
 from synariustools.tools.plotwidget import create_data_viewer, PlotViewerMode

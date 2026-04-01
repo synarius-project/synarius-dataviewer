@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Literal, cast
 
 import numpy as np
-from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QPen
+from PySide6.QtCore import QEvent, QMimeData, QObject, QRect, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -16,8 +16,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMessageBox,
     QMdiSubWindow,
+    QMessageBox,
+    QSizePolicy,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from synarius_core.recording import export_recording_buffers
 
 from synariustools.tools.plotwidget.channel_registry import ChannelRegistry
 from synariustools.tools.plotwidget.datasource import (
@@ -35,6 +37,8 @@ from synariustools.tools.plotwidget.mime import MIME_CHANNEL
 from synariustools.tools.plotwidget.modes import PlotViewerMode, resolve_mode
 from synariustools.tools.plotwidget.pixmap_scope import PixmapScopeWidget
 from synariustools.tools.plotwidget.plot_theme import (
+    DATAVIEWER_LEGEND_SIGNAL_HIDDEN_TEXT,
+    DATAVIEWER_LEGEND_SIGNAL_TEXT,
     STUDIO_TOOLBAR_FOREGROUND,
     data_viewer_legend_panel_stylesheet,
     studio_toolbar_stylesheet,
@@ -46,7 +50,6 @@ from synariustools.tools.plotwidget.series_math import (
     latest_y,
 )
 from synariustools.tools.plotwidget.svg_icons import icon_from_tinted_svg_file
-from synarius_core.recording import export_recording_buffers
 
 
 def _find_window_host(widget: QWidget) -> QWidget | None:
@@ -61,6 +64,41 @@ def _find_window_host(widget: QWidget) -> QWidget | None:
     except Exception:
         top = None
     return top if isinstance(top, QWidget) else None
+
+
+def _legend_table_sum_column_widths(table: QTableWidget, columns: Sequence[int]) -> int:
+    return sum(table.columnWidth(int(c)) for c in columns)
+
+
+def _dataviewer_legend_width_columns(
+    table: QTableWidget,
+    *,
+    col_color: int,
+    col_name: int,
+    col_value: int | None,
+    show_value_column: bool,
+    col_unit: int,
+    col_slider_a: int,
+    col_slider_b: int,
+    col_slider_diff: int,
+    slider_columns_visible: bool,
+) -> list[int]:
+    """Columns that contribute to the legend panel width (empty if the name column is hidden)."""
+    visible_cols = {c for c in range(table.columnCount()) if not table.isColumnHidden(c)}
+    if col_name not in visible_cols:
+        return []
+    cols = [col_color, col_name]
+    if show_value_column and col_value is not None:
+        cols.append(col_value)
+    cols.append(col_unit)
+    if slider_columns_visible:
+        cols.extend((col_slider_a, col_slider_b, col_slider_diff))
+    return cols
+
+
+def _dataviewer_legend_panel_content_width(table: QTableWidget, width_columns: Sequence[int]) -> int:
+    """Sum of column widths plus scrollbar gutter (matches DataViewer legend sizing)."""
+    return _legend_table_sum_column_widths(table, width_columns) + 2 + table.verticalScrollBar().sizeHint().width()
 
 
 class DataViewerWidget(QWidget):
@@ -86,8 +124,12 @@ class DataViewerWidget(QWidget):
         self._walk_span = 10.0
         self._legend_visible = self._mode_cfg.legend_visible_by_default
         self._channel_legend_row: dict[str, int] = {}
+        self._channel_name_labels: dict[str, QLabel] = {}
         self._legend_split_saved = self._mode_cfg.legend_split_saved
         self._slider_cols_saved = 240
+        self._slider_restore_host_geometry: tuple[int, int, int, int] | None = None
+        self._slider_restore_splitter_sizes: tuple[int, int] | None = None
+        self._slider_restore_legend_width: int | None = None
         self._highlighted_channels: set[str] = set()
         self._scope_window_saved_width: int | None = None
         self._save_last_dir: Path | None = None
@@ -327,13 +369,8 @@ class DataViewerWidget(QWidget):
         return raw_name.rsplit(".", 1)[1]
 
     def _apply_legend_name_display(self) -> None:
-        for row in range(self._legend_table.rowCount()):
-            nm = self._legend_table.item(row, self._col_name)
-            if nm is None:
-                continue
-            raw = nm.data(Qt.ItemDataRole.UserRole)
-            if isinstance(raw, str) and raw:
-                nm.setText(self._display_signal_name(raw))
+        for ch_name, lbl in self._channel_name_labels.items():
+            lbl.setText(self._display_signal_name(ch_name))
         self._position_skip_namespace_checkbox()
 
     def _position_hint(self) -> None:
@@ -411,36 +448,59 @@ class DataViewerWidget(QWidget):
         else:
             self._refresh_slider_legend_values()
 
-    def _set_slider_columns_visible(self, visible: bool) -> None:
-        prev_sizes = self._splitter.sizes()
-        current_legend_w = prev_sizes[1] if len(prev_sizes) > 1 else self._legend_panel.width()
+    def _maybe_snapshot_slider_restore_state(
+        self,
+        visible: bool,
+        prev_sizes: list[int],
+        current_legend_w: int,
+        host_geo_before: QRect | None,
+    ) -> None:
+        if not visible or self._slider_restore_splitter_sizes is not None or len(prev_sizes) <= 1:
+            return
+        self._slider_restore_splitter_sizes = (int(prev_sizes[0]), int(prev_sizes[1]))
+        self._slider_restore_legend_width = int(current_legend_w)
+        if host_geo_before is not None:
+            g = host_geo_before
+            self._slider_restore_host_geometry = (
+                int(g.x()),
+                int(g.y()),
+                int(g.width()),
+                int(g.height()),
+            )
+
+    def _resize_legend_columns_for_slider_mode(self, slider_visible: bool) -> None:
         for col in (self._col_slider_a, self._col_slider_b, self._col_slider_diff):
-            self._legend_table.setColumnHidden(col, not visible)
+            self._legend_table.setColumnHidden(col, not slider_visible)
         self._legend_table.resizeColumnToContents(0)
         self._legend_table.setColumnWidth(self._col_unit, 24)
-        if visible:
+        if slider_visible:
             for col in (self._col_slider_a, self._col_slider_b, self._col_slider_diff):
                 self._legend_table.resizeColumnToContents(col)
         if self._mode_cfg.show_value_column and self._col_value is not None:
             self._legend_table.resizeColumnToContents(self._col_value)
-        legend_w = 0
-        visible_cols = [c for c in range(self._legend_table.columnCount()) if not self._legend_table.isColumnHidden(c)]
-        if self._col_name in visible_cols:
-            for col in (self._col_color, self._col_name):
-                legend_w += self._legend_table.columnWidth(col)
-            if self._mode_cfg.show_value_column and self._col_value is not None:
-                legend_w += self._legend_table.columnWidth(self._col_value)
-            legend_w += self._legend_table.columnWidth(self._col_unit)
-            if visible:
-                legend_w += (
-                    self._legend_table.columnWidth(self._col_slider_a)
-                    + self._legend_table.columnWidth(self._col_slider_b)
-                    + self._legend_table.columnWidth(self._col_slider_diff)
-                )
-        legend_w += 2 + self._legend_table.verticalScrollBar().sizeHint().width()
+
+    def _legend_panel_target_width_for_slider_state(self, slider_visible: bool) -> int:
+        width_cols = _dataviewer_legend_width_columns(
+            self._legend_table,
+            col_color=self._col_color,
+            col_name=self._col_name,
+            col_value=self._col_value,
+            show_value_column=self._mode_cfg.show_value_column,
+            col_unit=self._col_unit,
+            col_slider_a=self._col_slider_a,
+            col_slider_b=self._col_slider_b,
+            col_slider_diff=self._col_slider_diff,
+            slider_columns_visible=slider_visible,
+        )
+        legend_w = _dataviewer_legend_panel_content_width(self._legend_table, width_cols)
         legend_w = max(self._min_legend_width, legend_w)
-        if not visible:
+        if not slider_visible:
             legend_w = min(legend_w, self._max_legend_width)
+            if self._slider_restore_legend_width is not None:
+                legend_w = int(self._slider_restore_legend_width)
+        return legend_w
+
+    def _apply_legend_panel_min_width_and_splitter(self, legend_w: int) -> None:
         self._legend_panel.setMinimumWidth(legend_w)
         self._legend_panel.setMaximumWidth(16_777_215)
         total_w = self._splitter.width()
@@ -448,17 +508,54 @@ class DataViewerWidget(QWidget):
             self._splitter.setSizes([max(220, total_w - legend_w), legend_w])
         self._enforce_splitter_bounds()
 
-        host = _find_window_host(self)
+    def _clear_slider_restore_snapshots(self) -> None:
+        self._slider_restore_splitter_sizes = None
+        self._slider_restore_legend_width = None
+        self._slider_restore_host_geometry = None
+
+    def _adjust_host_for_slider_columns(
+        self,
+        slider_visible: bool,
+        host: QWidget | None,
+        current_legend_w: int,
+        legend_w: int,
+    ) -> None:
         if host is None:
+            if not slider_visible:
+                self._clear_slider_restore_snapshots()
             return
-        if visible:
+        if slider_visible:
             self._slider_cols_saved = max(0, legend_w - max(self._min_legend_width, current_legend_w))
             g = host.geometry()
             host.setGeometry(g.x(), g.y(), g.width() + self._slider_cols_saved, g.height())
-        else:
+            return
+        restored = False
+        if self._slider_restore_splitter_sizes is not None:
+            self._splitter.setSizes(
+                [int(self._slider_restore_splitter_sizes[0]), int(self._slider_restore_splitter_sizes[1])]
+            )
+            restored = True
+        if self._slider_restore_host_geometry is not None:
+            x, y, w, h = self._slider_restore_host_geometry
+            host.setGeometry(int(x), int(y), max(host.minimumWidth(), int(w)), int(h))
+            restored = True
+        if not restored:
             g = host.geometry()
             nw = max(host.minimumWidth(), g.width() - self._slider_cols_saved)
             host.setGeometry(g.x(), g.y(), nw, g.height())
+        self._clear_slider_restore_snapshots()
+
+    def _set_slider_columns_visible(self, visible: bool) -> None:
+        prev_sizes = self._splitter.sizes()
+        current_legend_w = prev_sizes[1] if len(prev_sizes) > 1 else self._legend_panel.width()
+        host = _find_window_host(self)
+        host_geo_before = host.geometry() if host is not None else None
+
+        self._maybe_snapshot_slider_restore_state(visible, prev_sizes, current_legend_w, host_geo_before)
+        self._resize_legend_columns_for_slider_mode(visible)
+        legend_w = self._legend_panel_target_width_for_slider_state(visible)
+        self._apply_legend_panel_min_width_and_splitter(legend_w)
+        self._adjust_host_for_slider_columns(visible, host, current_legend_w, legend_w)
 
     def _slider_x_positions(self) -> tuple[float | None, float | None]:
         return self._scope.slider_data_x_positions()
@@ -500,10 +597,13 @@ class DataViewerWidget(QWidget):
             return
         ly = latest_y(pair[1])
         it.setText(fmt_measure(ly))
+        self._sync_legend_row_text_colors(name)
 
     def _clear_slider_legend_cells(self) -> None:
         for row in range(self._legend_table.rowCount()):
             self._set_legend_slider_cells(row, None, None, None)
+        for ch in self._channel_legend_row:
+            self._sync_legend_row_text_colors(ch)
 
     def _refresh_slider_legend_values(self) -> None:
         if not self._slider_action.isChecked():
@@ -520,6 +620,27 @@ class DataViewerWidget(QWidget):
             if ya is not None and yb is not None:
                 diff = float(yb - ya)
             self._set_legend_slider_cells(row, ya, yb, diff)
+            self._sync_legend_row_text_colors(name)
+
+    def _sync_legend_row_text_colors(self, name: str) -> None:
+        """Black row text when the trace is shown; gray when hidden via the scope checkbox."""
+        row = self._channel_legend_row.get(name)
+        if row is None:
+            return
+        visible = self._scope.is_series_visible(name)
+        hex_fg = DATAVIEWER_LEGEND_SIGNAL_TEXT if visible else DATAVIEWER_LEGEND_SIGNAL_HIDDEN_TEXT
+        brush = QBrush(QColor(hex_fg))
+        nl = self._channel_name_labels.get(name)
+        if nl is not None:
+            nl.setStyleSheet(f"color: {hex_fg}; background: transparent;")
+        cols: list[int] = [self._col_unit]
+        if self._mode_cfg.show_value_column and self._col_value is not None:
+            cols.append(self._col_value)
+        cols.extend((self._col_slider_a, self._col_slider_b, self._col_slider_diff))
+        for col in cols:
+            it = self._legend_table.item(row, col)
+            if it is not None:
+                it.setForeground(brush)
 
     def _register_legend_row(self, name: str, pen: QPen) -> None:
         if name in self._channel_legend_row:
@@ -544,11 +665,38 @@ class DataViewerWidget(QWidget):
 
         cb.toggled.connect(_on_cb_toggled)
 
-        nm = QTableWidgetItem(self._display_signal_name(name))
-        nm.setData(Qt.ItemDataRole.UserRole, name)
-        nm.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        nm.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-        self._legend_table.setItem(row, self._col_name, nm)
+        name_cell = QWidget()
+        name_lay = QHBoxLayout(name_cell)
+        name_lay.setContentsMargins(4, 0, 2, 0)
+        name_lay.setSpacing(4)
+        name_label = QLabel(self._display_signal_name(name))
+        name_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        name_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        name_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        name_label.setStyleSheet(
+            f"color: {DATAVIEWER_LEGEND_SIGNAL_TEXT}; background: transparent;"
+        )
+        name_lay.addWidget(name_label, 1)
+        vis_cb = QCheckBox(name_cell)
+        vis_cb.setChecked(True)
+        vis_cb.setToolTip("Show or hide trace on scope")
+        name_lay.addWidget(
+            vis_cb, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._legend_table.setCellWidget(row, self._col_name, name_cell)
+        self._channel_name_labels[name] = name_label
+
+        def _on_vis_toggled(checked: bool, chan: str = name) -> None:
+            self._scope.set_series_visible(chan, checked)
+            self._sync_legend_row_text_colors(chan)
+
+        vis_cb.toggled.connect(_on_vis_toggled)
         if self._mode_cfg.show_value_column and self._col_value is not None:
             v_item = QTableWidgetItem("—")
             v_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -567,6 +715,7 @@ class DataViewerWidget(QWidget):
             self._legend_table.setItem(row, col, s_item)
         self._channel_legend_row[name] = row
         self._refresh_latest_value_cell(name)
+        self._sync_legend_row_text_colors(name)
         if self._slider_action.isChecked():
             self._refresh_slider_legend_values()
 
@@ -574,6 +723,7 @@ class DataViewerWidget(QWidget):
         row = self._channel_legend_row.pop(name, None)
         if row is None:
             return
+        self._channel_name_labels.pop(name, None)
         self._legend_table.removeRow(row)
         for key, r in list(self._channel_legend_row.items()):
             if r > row:
@@ -582,14 +732,13 @@ class DataViewerWidget(QWidget):
     def _clear_legend_rows(self) -> None:
         self._legend_table.setRowCount(0)
         self._channel_legend_row.clear()
+        self._channel_name_labels.clear()
         self._highlighted_channels.clear()
 
     def add_channel(self, name: str) -> None:
         if name in self._registry:
             return
         tx, ty = self._data_source.get_series(name)
-        if len(tx) == 0:
-            return
         self._registry.add(name)
         pen = self._pen_for_channel(name)
         if pen is None:
@@ -685,6 +834,12 @@ class DataViewerWidget(QWidget):
             f = item.font()
             f.setBold(checked)
             item.setFont(f)
+
+        nl = self._channel_name_labels.get(name)
+        if nl is not None:
+            nf = nl.font()
+            nf.setBold(checked)
+            nl.setFont(nf)
 
         self._registry.set_highlight(name, checked)
         pen = self._pen_for_channel(name)

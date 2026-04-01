@@ -58,8 +58,9 @@ class PixmapScopeWidget(QWidget):
         self._walk_span = 10.0
 
         self.checkslider = False
-        self.line_a = 0
-        self.line_b = 0
+        # Slider positions in data (x) units so they stay fixed when the x-axis is rescaled.
+        self._slider_x_a: float | None = None
+        self._slider_x_b: float | None = None
         self.flag_a = True
         self.flag_b = True
         self._slider_hit_a = QRect()
@@ -97,12 +98,28 @@ class PixmapScopeWidget(QWidget):
         return QSize(12 * m, 8 * m)
 
     def set_series(self, name: str, t: np.ndarray, y: np.ndarray, pen: QPen) -> None:
+        prev = self._channels.get(name)
+        visible = True if prev is None else bool(prev.get("visible", True))
         self._channels[name] = {
             "t": np.asarray(t, dtype=np.float64).ravel(),
             "y": np.asarray(y, dtype=np.float64).ravel(),
             "pen": pen,
+            "visible": visible,
         }
         self._apply_walk_or_refresh()
+
+    def set_series_visible(self, name: str, visible: bool) -> None:
+        ch = self._channels.get(name)
+        if ch is None:
+            return
+        ch["visible"] = bool(visible)
+        self._apply_walk_or_refresh()
+
+    def is_series_visible(self, name: str) -> bool:
+        ch = self._channels.get(name)
+        if ch is None:
+            return True
+        return bool(ch.get("visible", True))
 
     def remove_series(self, name: str) -> None:
         self._channels.pop(name, None)
@@ -113,6 +130,8 @@ class PixmapScopeWidget(QWidget):
             self.max_x = 1.0
             self.min_y = 0.0
             self.max_y = 1.0
+            self._slider_x_a = None
+            self._slider_x_b = None
             self.refresh_pixmap()
 
     def clear_series(self) -> None:
@@ -121,6 +140,8 @@ class PixmapScopeWidget(QWidget):
         self.max_x = 1.0
         self.min_y = 0.0
         self.max_y = 1.0
+        self._slider_x_a = None
+        self._slider_x_b = None
         self.refresh_pixmap()
 
     def series_names(self) -> list[str]:
@@ -138,10 +159,11 @@ class PixmapScopeWidget(QWidget):
         self._apply_walk_or_refresh()
 
     def _pooled_finite(self, key: str, max_points: int = _POOL_MAX) -> np.ndarray:
-        n_ch = len(self._channels)
+        visible_ch = [ch for ch in self._channels.values() if ch.get("visible", True)]
+        n_ch = len(visible_ch)
         per = max(512, max_points // max(1, n_ch))
         blocks: list[np.ndarray] = []
-        for ch in self._channels.values():
+        for ch in visible_ch:
             a = np.asarray(ch[key], dtype=np.float64).ravel()
             m = np.isfinite(a)
             a = a[m]
@@ -214,6 +236,8 @@ class PixmapScopeWidget(QWidget):
     def _median_channel_t_end(self) -> float | None:
         ends: list[float] = []
         for ch in self._channels.values():
+            if not ch.get("visible", True):
+                continue
             t = np.asarray(ch["t"], dtype=np.float64).ravel()
             m = np.isfinite(t)
             t = t[m]
@@ -342,7 +366,7 @@ class PixmapScopeWidget(QWidget):
     def set_sliders_visible(self, on: bool) -> None:
         self.checkslider = bool(on)
         if on:
-            self._layout_slider_lines()
+            self._layout_slider_x_from_axis()
             self._sync_slider_hit_rects()
         self.refresh_pixmap()
         self.slider_positions_changed.emit()
@@ -353,7 +377,10 @@ class PixmapScopeWidget(QWidget):
         r = self._data_rect()
         if r.width() < 2:
             return None, None
-        return self._px_to_x(self.line_a, r), self._px_to_x(self.line_b, r)
+        self._layout_slider_x_from_axis()
+        if self._slider_x_a is None or self._slider_x_b is None:
+            return None, None
+        return float(self._slider_x_a), float(self._slider_x_b)
 
     def _data_rect(self) -> QRect:
         w, h = self.width(), self.height()
@@ -367,31 +394,67 @@ class PixmapScopeWidget(QWidget):
         fw = float(max(rect.width() - 1, 1))
         return float(self.min_x) + (float(px) - float(rect.left())) / fw * span
 
-    def _layout_slider_lines(self) -> None:
+    def _x_to_px(self, x_data: float, rect: QRect) -> int:
+        span = float(self.max_x - self.min_x)
+        if span <= 0 or not math.isfinite(span):
+            return int(rect.left() + max(rect.width() - 1, 0) // 2)
+        fw = float(max(rect.width() - 1, 1))
+        t = (float(x_data) - float(self.min_x)) / span
+        t = max(0.0, min(1.0, t))
+        return int(round(float(rect.left()) + t * fw))
+
+    def _min_slider_sep_data(self, rect: QRect) -> float:
+        span = float(self.max_x - self.min_x)
+        fw = float(max(rect.width() - 1, 1))
+        if span <= 0 or fw <= 0 or not math.isfinite(span):
+            return 0.0
+        return (8.0 / fw) * span
+
+    def _effective_slider_sep_data(self, rect: QRect) -> float:
+        """Minimum A/B separation in data-x (fallback when view span is degenerate)."""
+        sep = self._min_slider_sep_data(rect)
+        if sep > 0.0:
+            return sep
+        span = abs(float(self.max_x - self.min_x))
+        if math.isfinite(span) and span > 0.0:
+            return max(1e-30, span * 1e-12)
+        return 1e-30
+
+    @staticmethod
+    def _slider_x_within_axis_span(x_data: float, lo: float, hi: float) -> bool:
+        if not math.isfinite(x_data) or not math.isfinite(lo) or not math.isfinite(hi):
+            return False
+        if hi < lo:
+            lo, hi = hi, lo
+        return lo <= x_data <= hi
+
+    def _slider_x_visible_on_plot(self, x_data: float) -> bool:
+        return self._slider_x_within_axis_span(
+            x_data, float(self.min_x), float(self.max_x)
+        )
+
+    def _layout_slider_x_from_axis(self) -> None:
+        """Init default positions; keep A/B ordered with min separation (may lie outside the visible x range)."""
         if not self.checkslider:
             return
         r = self._data_rect()
         if r.width() < 10:
             return
-        lo = r.left() + 2
-        hi = r.right() - 2
-        if hi <= lo:
+        lo = float(self.min_x)
+        hi = float(self.max_x)
+        span = hi - lo
+        if span <= 0 or not math.isfinite(span):
             return
-        out = (
-            self.line_a < lo
-            or self.line_a > hi
-            or self.line_b < lo
-            or self.line_b > hi
-            or (self.line_a == 0 and self.line_b == 0)
-            or (self.line_b - self.line_a < 8)
-        )
-        if out:
-            self.line_a = int(r.left() + 0.35 * (r.width() - 1))
-            self.line_b = int(r.left() + 0.65 * (r.width() - 1))
-        self.line_a = int(max(lo, min(hi, self.line_a)))
-        self.line_b = int(max(lo, min(hi, self.line_b)))
-        if self.line_b - self.line_a < 8:
-            self.line_b = int(min(hi, self.line_a + 8))
+        sep = self._effective_slider_sep_data(r)
+
+        if self._slider_x_a is None or self._slider_x_b is None:
+            self._slider_x_a = lo + 0.35 * span
+            self._slider_x_b = lo + 0.65 * span
+
+        if float(self._slider_x_b) - float(self._slider_x_a) < sep:
+            mid = 0.5 * (float(self._slider_x_a) + float(self._slider_x_b))
+            self._slider_x_a = mid - 0.5 * sep
+            self._slider_x_b = mid + 0.5 * sep
 
     def _slider_circle_rect(self, line_x: int, rect: QRect) -> QRect:
         r = _SLIDER_CIRCLE_R
@@ -415,8 +478,19 @@ class PixmapScopeWidget(QWidget):
         r = self._data_rect()
         if r.width() < 10:
             return
-        self._slider_hit_a = self._slider_hit_column_rect(self.line_a, r)
-        self._slider_hit_b = self._slider_hit_column_rect(self.line_b, r)
+        self._layout_slider_x_from_axis()
+        if self._slider_x_a is None or self._slider_x_b is None:
+            self._slider_hit_a = QRect()
+            self._slider_hit_b = QRect()
+            return
+        self._slider_hit_a = QRect()
+        self._slider_hit_b = QRect()
+        if self._slider_x_visible_on_plot(float(self._slider_x_a)):
+            la = self._x_to_px(float(self._slider_x_a), r)
+            self._slider_hit_a = self._slider_hit_column_rect(la, r)
+        if self._slider_x_visible_on_plot(float(self._slider_x_b)):
+            lb = self._x_to_px(float(self._slider_x_b), r)
+            self._slider_hit_b = self._slider_hit_column_rect(lb, r)
 
     def showEvent(self, event) -> None:  # noqa: ANN001
         super().showEvent(event)
@@ -426,7 +500,7 @@ class PixmapScopeWidget(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: ANN001
         super().resizeEvent(event)
         if self.checkslider:
-            self._layout_slider_lines()
+            self._layout_slider_x_from_axis()
             self._sync_slider_hit_rects()
         self.refresh_pixmap()
 
@@ -473,7 +547,7 @@ class PixmapScopeWidget(QWidget):
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
         self._draw_curves(painter, rect)
         if self.checkslider:
-            self._layout_slider_lines()
+            self._layout_slider_x_from_axis()
             self._draw_sliders(painter, rect)
             self._sync_slider_hit_rects()
 
@@ -546,34 +620,32 @@ class PixmapScopeWidget(QWidget):
                 painter.drawText(2, yi - 10, self._margin_left - 6, 20, ay, f"{yv:.6g}")
 
     def _draw_sliders(self, painter: QPainter, rect: QRect) -> None:
-        la, lb = int(self.line_a), int(self.line_b)
+        if self._slider_x_a is None or self._slider_x_b is None:
+            return
         top_y = rect.top() + 2
         bot_y = rect.bottom() - 2
-        painter.setPen(self._pen_slider_a)
-        painter.drawLine(la, top_y, la, bot_y)
-        painter.setPen(self._pen_slider_b)
-        painter.drawLine(lb, top_y, lb, bot_y)
-
-        ra = self._slider_circle_rect(la, rect)
-        rb = self._slider_circle_rect(lb, rect)
-
-        # Filled circles without outline for A/B
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._color_slider_a)
-        painter.drawEllipse(ra)
-        painter.setBrush(self._color_slider_b)
-        painter.drawEllipse(rb)
-
-        # Text labels A/B on top
-        painter.setPen(QPen(QColor(40, 30, 0), 1))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawText(
-            ra,
-            Qt.AlignmentFlag.AlignCenter,
-            "A",
-        )
-        painter.setPen(QPen(QColor(60, 0, 60), 1))
-        painter.drawText(rb, Qt.AlignmentFlag.AlignCenter, "B")
+        if self._slider_x_visible_on_plot(float(self._slider_x_a)):
+            la = self._x_to_px(float(self._slider_x_a), rect)
+            painter.setPen(self._pen_slider_a)
+            painter.drawLine(la, top_y, la, bot_y)
+            ra = self._slider_circle_rect(la, rect)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._color_slider_a)
+            painter.drawEllipse(ra)
+            painter.setPen(QPen(QColor(40, 30, 0), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawText(ra, Qt.AlignmentFlag.AlignCenter, "A")
+        if self._slider_x_visible_on_plot(float(self._slider_x_b)):
+            lb = self._x_to_px(float(self._slider_x_b), rect)
+            painter.setPen(self._pen_slider_b)
+            painter.drawLine(lb, top_y, lb, bot_y)
+            rb = self._slider_circle_rect(lb, rect)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self._color_slider_b)
+            painter.drawEllipse(rb)
+            painter.setPen(QPen(QColor(60, 0, 60), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawText(rb, Qt.AlignmentFlag.AlignCenter, "B")
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def _draw_curves(self, painter: QPainter, rect: QRect) -> None:
@@ -591,6 +663,8 @@ class PixmapScopeWidget(QWidget):
         rl = float(rect.left())
         rb = float(rect.bottom())
         for ch in self._channels.values():
+            if not ch.get("visible", True):
+                continue
             t = ch["t"]
             y = ch["y"]
             pen = ch["pen"]
@@ -735,7 +809,7 @@ class PixmapScopeWidget(QWidget):
         self.max_y = max(y_top, y_bot)
         self._sanitize_axis_limits()
         if self.checkslider:
-            self._layout_slider_lines()
+            self._layout_slider_x_from_axis()
             self._sync_slider_hit_rects()
 
     def wheelEvent(self, event) -> None:  # noqa: ANN001
@@ -778,11 +852,15 @@ class PixmapScopeWidget(QWidget):
             if self._slider_hit_a.contains(pos):
                 self.flag_a = False
                 self.flag_b = True
-                x = int(pos.x())
-                x = max(r.left() + 2, min(r.right() - 2, x))
-                if self.line_b - x <= 8:
-                    x = self.line_b - 8
-                self.line_a = x
+                self._layout_slider_x_from_axis()
+                w = max(1, self.width())
+                x = max(0, min(w - 1, int(pos.x())))
+                x_data = self._px_to_x(x, r)
+                sep = self._effective_slider_sep_data(r)
+                xb = float(self._slider_x_b) if self._slider_x_b is not None else x_data + sep
+                if xb - x_data < sep:
+                    x_data = xb - sep
+                self._slider_x_a = x_data
                 self._sync_slider_hit_rects()
                 self.refresh_pixmap()
                 self.slider_positions_changed.emit()
@@ -791,11 +869,15 @@ class PixmapScopeWidget(QWidget):
             if self._slider_hit_b.contains(pos):
                 self.flag_b = False
                 self.flag_a = True
-                x = int(pos.x())
-                x = max(r.left() + 2, min(r.right() - 2, x))
-                if x - self.line_a <= 8:
-                    x = self.line_a + 8
-                self.line_b = x
+                self._layout_slider_x_from_axis()
+                w = max(1, self.width())
+                x = max(0, min(w - 1, int(pos.x())))
+                x_data = self._px_to_x(x, r)
+                sep = self._effective_slider_sep_data(r)
+                xa = float(self._slider_x_a) if self._slider_x_a is not None else x_data - sep
+                if x_data - xa < sep:
+                    x_data = xa + sep
+                self._slider_x_b = x_data
                 self._sync_slider_hit_rects()
                 self.refresh_pixmap()
                 self.slider_positions_changed.emit()
@@ -872,19 +954,23 @@ class PixmapScopeWidget(QWidget):
 
         if self.checkslider and (event.buttons() & Qt.MouseButton.LeftButton):
             r = self._data_rect()
-            x = int(pos.x())
-            x = max(r.left() + 2, min(r.right() - 2, x))
+            w = max(1, self.width())
+            x = max(0, min(w - 1, int(pos.x())))
+            x_data = self._px_to_x(x, r)
+            sep = self._effective_slider_sep_data(r)
             if not self.flag_a:
-                if self.line_b - x <= 8:
-                    x = self.line_b - 8
-                self.line_a = x
+                xb = float(self._slider_x_b) if self._slider_x_b is not None else x_data + sep
+                if xb - x_data < sep:
+                    x_data = xb - sep
+                self._slider_x_a = x_data
                 self._sync_slider_hit_rects()
                 self.refresh_pixmap()
                 self.slider_positions_changed.emit()
             elif not self.flag_b:
-                if x - self.line_a <= 8:
-                    x = self.line_a + 8
-                self.line_b = x
+                xa = float(self._slider_x_a) if self._slider_x_a is not None else x_data - sep
+                if x_data - xa < sep:
+                    x_data = xa + sep
+                self._slider_x_b = x_data
                 self._sync_slider_hit_rects()
                 self.refresh_pixmap()
                 self.slider_positions_changed.emit()
