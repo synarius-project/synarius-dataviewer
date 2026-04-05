@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import traceback
 from datetime import datetime
 from typing import Callable
 
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFontDatabase, QIcon
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMainWindow, QPushButton, QPlainTextEdit, QVBoxLayout, QWidget
-from synarius_core.controller import MinimalController
+from synarius_core.controller import CommandError, MinimalController
 
 from synarius_dataviewer.app import theme
 
@@ -14,12 +13,20 @@ from synarius_dataviewer.app import theme
 class ConsoleWindow(QMainWindow):
     """Standalone REPL view backed by the shared MinimalController instance."""
 
-    def __init__(self, controller: MinimalController, *, on_command_executed: Callable[[], None]) -> None:
+    def __init__(
+        self,
+        controller: MinimalController,
+        *,
+        on_command_executed: Callable[[], None],
+        app_icon: QIcon | None = None,
+    ) -> None:
         super().__init__()
         self._controller = controller
         self._on_command_executed = on_command_executed
         self.setWindowTitle("Synarius ParaWiz — CLI")
         self.resize(960, 520)
+        if app_icon is not None and not app_icon.isNull():
+            self.setWindowIcon(app_icon)
 
         root = QWidget(self)
         self.setCentralWidget(root)
@@ -67,11 +74,10 @@ class ConsoleWindow(QMainWindow):
             suffix = f" -> {out}" if out else ""
             self._append("INFO", "synarius_parawiz.console", f"command [repl] ok: {cmd}{suffix}")
             self._on_command_executed()
+        except CommandError as exc:
+            self._append("ERROR", "synarius_parawiz.console", str(exc))
         except Exception as exc:
-            self._append("ERROR", "synarius_parawiz.console", f"command [repl] raised: {cmd}")
-            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).rstrip()
-            for ln in tb.splitlines():
-                self._append("ERROR", "synarius_parawiz.console", ln)
+            self._append("ERROR", "synarius_parawiz.console", str(exc))
 
     def show_and_raise(self) -> None:
         self.show()

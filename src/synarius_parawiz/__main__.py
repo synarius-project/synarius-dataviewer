@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
 from synarius_parawiz._version import __version__
 
@@ -29,26 +28,21 @@ def main() -> int:
         except Exception:
             pass
 
-    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
 
+    from synarius_parawiz.app.icon_utils import parawiz_app_icon
     from synarius_parawiz.app.main_window import MainWindow
-
-    p_via_file = Path(__file__).resolve().parents[1] / "synarius_dataviewer" / "app" / "icons" / "synarius64.png"
-    icon_path = p_via_file
-    try:
-        import synarius_dataviewer as sdv
-
-        p_via_pkg = Path(sdv.__file__).resolve().parent / "app" / "icons" / "synarius64.png"
-        if p_via_pkg.is_file():
-            icon_path = p_via_pkg
-    except Exception:
-        pass
 
     app = QApplication(sys.argv)
     app.setApplicationName("Synarius ParaWiz")
     app.setApplicationVersion(__version__)
-    app.setWindowIcon(QIcon(str(icon_path)))
+    # Align with AppUserModelID (Windows taskbar / jump lists).
+    try:
+        app.setDesktopFileName("synarius.parawiz")
+    except Exception:
+        pass
+    _icon = parawiz_app_icon()
+    app.setWindowIcon(_icon)
     w = MainWindow()
     w.show()
     return int(app.exec())

@@ -47,8 +47,10 @@ include = ["synarius_dataviewer*", "synarius_parawiz*", "synariustools*"]
 
 # Non-Python assets must be declared or wheels/CI installs lack toolbar icons; Studio's bundled
 # DataViewer then fails at runtime (FileNotFoundError) when opening the live plot widget.
+# Same for ParaWiz / CalibrationMapWidget toolbar icons.
 [tool.setuptools.package-data]
 "synariustools.tools.plotwidget" = ["icons/**/*.svg"]
+"synariustools.tools.calmapwidget" = ["icons/*.svg"]
 "synarius_dataviewer.app" = ["icons/**/*.svg", "icons/**/*.png"]
 
 [tool.pyright]

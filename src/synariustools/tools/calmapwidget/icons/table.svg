@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 22 22"
+   version="1.1"
+   id="svg1"
+   sodipodi:docname="table.svg"
+   inkscape:version="1.3.2 (091e20e, 2023-11-25, custom)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showguides="true"
+     inkscape:zoom="8"
+     inkscape:cx="2.875"
+     inkscape:cy="-11.5625"
+     inkscape:window-width="1920"
+     inkscape:window-height="1009"
+     inkscape:window-x="-8"
+     inkscape:window-y="-8"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="g4" />
+  <defs
+     id="defs3051">
+    <style
+       type="text/css"
+       id="current-color-scheme">
+      .ColorScheme-Text {
+        color:#232629;
+      }
+      </style>
+  </defs>
+  <g
+     id="g4"
+     transform="translate(-0.48613591,0.04419417)">
+    <rect
+       style="fill:none;stroke:#232629;stroke-width:1.116;stroke-dasharray:none;stroke-dashoffset:5.11166;stroke-opacity:1"
+       id="rect1"
+       width="15.893407"
+       height="14.889109"
+       x="3.558687"
+       y="3.5560672" />
+    <rect
+       style="fill:#232629;fill-opacity:1;stroke:#232629;stroke-width:1.116;stroke-dashoffset:5.11166"
+       id="rect2"
+       width="15.556349"
+       height="2.1213205"
+       x="3.8448932"
+       y="4.1542525" />
+    <path
+       style="fill:#232629;fill-opacity:1;stroke:#232629;stroke-width:1.116;stroke-dashoffset:5.11166"
+       d="m 13.610505,6.317086 -0.05492,12.156079"
+       id="path2"
+       sodipodi:nodetypes="cc" />
+    <path
+       style="fill:#232629;fill-opacity:1;stroke:#232629;stroke-width:1.116;stroke-dashoffset:5.11166"
+       d="M 19.085896,10.456961 3.6610012,10.405363"
+       id="path3"
+       sodipodi:nodetypes="cc" />
+    <path
+       style="fill:#232629;fill-opacity:1;stroke:#232629;stroke-width:1.116;stroke-dashoffset:5.11166"
+       d="M 19.50509,14.472627 4.0801954,14.421029"
+       id="path4"
+       sodipodi:nodetypes="cc" />
+  </g>
+</svg>
