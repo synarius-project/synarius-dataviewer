@@ -58,6 +58,35 @@ def studio_toolbar_stylesheet() -> str:
     )
 
 
+def _studio_commit_toolbutton_qss(selector: str) -> str:
+    """Gleiche Fläche für Apply/Discard; selector z. B. ``QToolButton`` (pro Widget) oder Toolbar+ID."""
+    fg = STUDIO_TOOLBAR_FOREGROUND
+    prim = STUDIO_TOOLBAR_ACTIVE_ACTION_BACKGROUND
+    prim_h = _rgb_hex_scale(prim, 1.14)
+    prim_p = _rgb_hex_scale(prim, 0.82)
+    return (
+        f"{selector} {{"
+        f"background-color: {prim}; color: {fg}; padding: 5px 16px; border-radius: 4px; border: none;"
+        f"font-weight: 600; min-height: 22px; }}"
+        f"{selector}:hover {{ background-color: {prim_h}; }}"
+        f"{selector}:pressed {{ background-color: {prim_p}; }}"
+        f"{selector}:checked {{ background-color: {prim}; }}"
+    )
+
+
+def studio_commit_toolbutton_widget_stylesheet() -> str:
+    """Lokales QSS für Commit-QToolButton: vermeidet Abweichung zur Toolbar-Basis-QSS (Kaskade/Native)."""
+    return _studio_commit_toolbutton_qss("QToolButton")
+
+
+def studio_toolbar_commit_actions_stylesheet() -> str:
+    """Toolbar-Variante (falls Commit-Buttons ohne eigenes setStyleSheet eingebunden werden)."""
+    _btn = (
+        "QToolBar QToolButton#SynariusToolbarCommitApply, QToolBar QToolButton#SynariusToolbarCommitDiscard"
+    )
+    return _studio_commit_toolbutton_qss(_btn)
+
+
 def _scoped_channel_grid_table_qss(scope: str) -> str:
     bg = RESOURCES_PANEL_BACKGROUND
     alt = RESOURCES_PANEL_ALTERNATE_ROW

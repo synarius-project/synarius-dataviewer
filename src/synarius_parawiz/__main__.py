@@ -16,21 +16,23 @@ def main() -> int:
         print(__version__)
         return 0
 
-    # Windows: set AppUserModelID before any Qt import so the taskbar can group this process
-    # under synarius.parawiz instead of generic python.exe.
+    # Windows: AppUserModelID vor Qt, sonst Taskbar-Gruppe/Icon oft bei python.exe.
     if sys.platform.startswith("win"):
         try:
             import ctypes
 
+            from synarius_parawiz.app.windows_app_id import PARAWIZ_APP_USER_MODEL_ID
+
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(  # type: ignore[attr-defined]
-                "synarius.parawiz"
+                PARAWIZ_APP_USER_MODEL_ID
             )
         except Exception:
             pass
 
+    from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
-    from synarius_parawiz.app.icon_utils import parawiz_app_icon
+    from synarius_parawiz.app.icon_utils import parawiz_app_icon, windows_apply_native_taskbar_icon
     from synarius_parawiz.app.main_window import MainWindow
 
     app = QApplication(sys.argv)
@@ -45,6 +47,9 @@ def main() -> int:
     app.setWindowIcon(_icon)
     w = MainWindow()
     w.show()
+    # Win32: Titelleiste nutzt QIcon; die Taskbar holt oft HICON per WM_SETICON (sonst python.exe).
+    if sys.platform.startswith("win"):
+        QTimer.singleShot(0, lambda win=w: windows_apply_native_taskbar_icon(win))
     return int(app.exec())
 
 

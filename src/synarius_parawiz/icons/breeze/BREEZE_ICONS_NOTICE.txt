@@ -1,0 +1,18 @@
+Third-party artwork: KDE Breeze Icons
+======================================
+
+The SVG files in this directory are unmodified copies from the KDE project
+"breeze-icons" (Frameworks), retrieved from the upstream Git repository:
+
+  https://invent.kde.org/frameworks/breeze-icons
+
+Bundled files and upstream paths:
+  document-open.svg      — icons/actions/22/document-open.svg
+  document-import.svg    — icons/actions/22/document-import.svg
+  view-refresh.svg       — icons/actions/22/view-refresh.svg
+  utilities-terminal.svg — icons/apps/22/utilities-terminal.svg
+  dialog-ok-apply.svg    — icons/actions/22/dialog-ok-apply.svg
+  vcs-diff.svg           — icons/actions/22/vcs-diff.svg
+
+SPDX-License-Identifier: LGPL-3.0-only
+Full license text: https://spdx.org/licenses/LGPL-3.0-only.html

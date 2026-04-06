@@ -56,6 +56,17 @@ class ConsoleWindow(QMainWindow):
 
         self._append("INFO", "synarius_parawiz.console", "console started")
 
+    def append_parawiz_ccp(self, cmd: str, result: str | None = None, error: str | None = None) -> None:
+        """Protokolliert CCP-Zeilen aus ParaWiz (z. B. nach Apply im Kennfeld), analog zum REPL."""
+        self._append("INFO", "synarius_parawiz.ccp", f"command [parawiz]: {cmd}")
+        if error:
+            self._append("ERROR", "synarius_parawiz.ccp", error)
+        elif result is not None:
+            if len(cmd) > 240:
+                self._append("INFO", "synarius_parawiz.ccp", f"command [parawiz] ok -> {result}")
+            else:
+                self._append("INFO", "synarius_parawiz.ccp", f"command [parawiz] ok: {cmd} -> {result}")
+
     def _now(self) -> str:
         return datetime.now().strftime("%H:%M:%S")
 

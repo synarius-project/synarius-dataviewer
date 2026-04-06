@@ -52,6 +52,7 @@ include = ["synarius_dataviewer*", "synarius_parawiz*", "synariustools*"]
 "synariustools.tools.plotwidget" = ["icons/**/*.svg"]
 "synariustools.tools.calmapwidget" = ["icons/*.svg"]
 "synarius_dataviewer.app" = ["icons/**/*.svg", "icons/**/*.png"]
+"synarius_parawiz" = ["icons/breeze/*.svg", "icons/breeze/*.txt"]
 
 [tool.pyright]
 extraPaths = ["../synarius-core/src"]

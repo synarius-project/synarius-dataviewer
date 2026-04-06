@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from uuid import UUID
 
 import numpy as np
-
 from synarius_core.parameters.repository import ParameterRecord
 
 
@@ -41,6 +41,8 @@ class CalibrationMapData:
     axis_names: dict[int, str] = field(default_factory=dict)
     axis_units: dict[int, str] = field(default_factory=dict)
     detail_rows: tuple[tuple[str, str], ...] = ()
+    #: Gesetzt bei Snapshots aus :class:`ParameterRecord` (ParaWiz → Modell/CCP).
+    parameter_id: UUID | None = None
 
     @classmethod
     def from_parameter_record(cls, rec: ParameterRecord) -> CalibrationMapData:
@@ -55,6 +57,7 @@ class CalibrationMapData:
             axis_names={int(k): str(v) for k, v in rec.axis_names.items()},
             axis_units={int(k): str(v) for k, v in rec.axis_units.items()},
             detail_rows=_parameter_detail_rows(rec),
+            parameter_id=rec.parameter_id,
         )
 
     def axis_values(self, axis_idx: int) -> np.ndarray:
@@ -81,3 +84,10 @@ def supports_calibration_plot(rec: ParameterRecord) -> bool:
     if rec.is_text:
         return False
     return int(rec.values.ndim) >= 1
+
+
+def supports_calibration_scalar_edit(rec: ParameterRecord) -> bool:
+    """True if the record is a numeric 0-d scalar (editable in CalibrationMapShell, no plot)."""
+    if rec.is_text:
+        return False
+    return int(np.asarray(rec.values, dtype=np.float64).ndim) == 0
