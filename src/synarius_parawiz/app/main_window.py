@@ -76,6 +76,8 @@ from synarius_parawiz.app.status_progress_widget import StatusMessageProgressBar
 from synariustools.tools.plotwidget.svg_icons import icon_from_svg_file, icon_from_tinted_svg_file
 
 _LOG_PERF = logging.getLogger("synarius_parawiz.performance")
+# Protokoll-Backlog ohne Konsole: keine mehreren MB pro ``cmd``-Eintrag
+_PARAWIZ_PROTOCOL_BACKLOG_CMD_CHARS = 24_000
 
 
 def _parawiz_profile_enabled() -> bool:
@@ -87,6 +89,53 @@ def _parawiz_profile_log(msg: str) -> None:
     """Schreibt Profiling-Zeilen in Logger und stderr (ohne extra Log-Level-Konfiguration)."""
     _LOG_PERF.info(msg)
     print(msg, file=sys.stderr, flush=True)
+
+
+def _parawiz_profile_copy_enabled() -> bool:
+    """True wenn Kopier-Profiling gewünscht (allein oder zusammen mit SYNARIUS_PARAWIZ_PROFILE)."""
+    if _parawiz_profile_enabled():
+        return True
+    v = os.environ.get("SYNARIUS_PARAWIZ_PROFILE_COPY", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _parawiz_profile_copy_log(msg: str) -> None:
+    """Wie ``_parawiz_profile_log``, mit einheitlichem Präfix ``parawiz profile copy:``."""
+    line = "parawiz profile copy: " + msg
+    _LOG_PERF.info(line)
+    print(line, file=sys.stderr, flush=True)
+
+
+def _parawiz_agent_ndjson(
+    *,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict,
+    run_id: str = "pre-fix",
+) -> None:
+    # region agent log
+    try:
+        _p = Path(__file__).resolve().parents[4] / "debug-788002.log"
+        with _p.open("a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "788002",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                        "runId": run_id,
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # endregion
 
 
 def _parawiz_effective_cross_style_row_cap(class_default: int) -> int:
@@ -138,30 +187,43 @@ PARAWIZ_TARGET_DATASET_NAME = "parawiz_target"
 
 
 def _parawiz_build_ccp_select_lines(refs: list[str], *, max_cmd_chars: int) -> list[str]:
-    """Split ``refs`` into ``select`` / ``select -p`` CCP lines so each stays under ``max_cmd_chars``."""
+    """Split ``refs`` into ``select`` / ``select -p`` CCP lines so each stays under ``max_cmd_chars``.
+
+    Greedy O(n): vermeidet ``cur + [r]`` und wiederholtes ``join`` (war bei ~10k Refs O(n²) und Minuten).
+    """
     if not refs:
         return []
     chunks: list[list[str]] = []
     cur: list[str] = []
+    body_len = 0
+
+    def line_prefix() -> str:
+        return "select " if not chunks else "select -p "
+
     for r in refs:
-        trial = cur + [r]
-        first_chunk = len(chunks) == 0
-        prefix = "select " if first_chunk else "select -p "
-        line_len = len(prefix + " ".join(shlex.quote(x) for x in trial))
-        if line_len <= max_cmd_chars:
-            cur = trial
+        qr = shlex.quote(r)
+        if not cur:
+            pref = line_prefix()
+            if len(pref) + len(qr) > max_cmd_chars:
+                chunks.append([r])
+                continue
+            cur = [r]
+            body_len = len(qr)
             continue
-        if cur:
-            chunks.append(cur)
-            cur = []
-        first_chunk = len(chunks) == 0
-        prefix = "select " if first_chunk else "select -p "
-        lone = prefix + shlex.quote(r)
-        if len(lone) > max_cmd_chars:
+        pref = line_prefix()
+        if len(pref) + body_len + 1 + len(qr) <= max_cmd_chars:
+            cur.append(r)
+            body_len += 1 + len(qr)
+            continue
+        chunks.append(cur)
+        cur = []
+        body_len = 0
+        pref = line_prefix()
+        if len(pref) + len(qr) > max_cmd_chars:
             chunks.append([r])
-            cur = []
             continue
         cur = [r]
+        body_len = len(qr)
     if cur:
         chunks.append(cur)
     out: list[str] = []
@@ -171,6 +233,40 @@ def _parawiz_build_ccp_select_lines(refs: list[str], *, max_cmd_chars: int) -> l
         else:
             out.append("select -p " + " ".join(shlex.quote(x) for x in ch))
     return out
+
+
+def _parawiz_build_ccp_minus_m_lines(refs: list[str], *, max_cmd_chars: int) -> list[str]:
+    """Wie Chunking für ``select``, aber jede Zeile ist ``select -m a b c …`` (Abwahl). O(n)."""
+    if not refs:
+        return []
+    prefix = "select -m "
+    chunks: list[list[str]] = []
+    cur: list[str] = []
+    body_len = 0
+    for r in refs:
+        qr = shlex.quote(r)
+        if not cur:
+            if len(prefix) + len(qr) > max_cmd_chars:
+                chunks.append([r])
+                continue
+            cur = [r]
+            body_len = len(qr)
+            continue
+        if len(prefix) + body_len + 1 + len(qr) <= max_cmd_chars:
+            cur.append(r)
+            body_len += 1 + len(qr)
+            continue
+        chunks.append(cur)
+        cur = []
+        body_len = 0
+        if len(prefix) + len(qr) > max_cmd_chars:
+            chunks.append([r])
+            continue
+        cur = [r]
+        body_len = len(qr)
+    if cur:
+        chunks.append(cur)
+    return [prefix + " ".join(shlex.quote(x) for x in ch) for ch in chunks]
 
 
 def _parameter_name_matches_filter(name: str, pattern: str) -> bool:
@@ -325,6 +421,7 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(self._app_icon)
 
         self._controller = MinimalController()
+        self._controller.cp_selection_progress_hook = self._parawiz_cp_selection_progress
         self._console_window: ConsoleWindow | None = None
         self._parawiz_protocol_backlog: list[tuple[str, str]] = []
         # Modeless plot dialogs (avoid GC + track for optional future use)
@@ -674,6 +771,18 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             app.quit()
+
+    def _parawiz_cp_selection_progress(self, idx: int, total: int) -> None:
+        """Von ``MinimalController._cmd_cp_selection_to_dataset``: Fortschrittsbalken in der Statuszeile."""
+        if total <= 0:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+        fr = self._dcm_import_ensure_status_frame()
+        fr.set_range(0, max(1, total))
+        fr.set_value(min(max(0, idx), total))
+        fr.set_message(f"Kopieren in Zieldatensatz: {idx} / {total} Parameter …")
 
     @staticmethod
     def _parawiz_scroll_resize_hit_extended(tw: QTableWidget, vx: int) -> tuple[int | None, str]:
@@ -1661,6 +1770,19 @@ class MainWindow(QMainWindow):
         line = cmd.strip()
         if not line:
             return ""
+        if source == "parawiz-select" and len(line) > 500:
+            # region agent log
+            _parawiz_agent_ndjson(
+                hypothesis_id="H1",
+                location="main_window._parawiz_execute_ccp",
+                message="ccp_select_cmd_size",
+                data={
+                    "line_chars": len(line),
+                    "source": source,
+                    "will_protocol_echo": echo_command is not False and source != "repl",
+                },
+            )
+            # endregion
         cw = self._console_window
 
         if echo_command is None:
@@ -1671,9 +1793,33 @@ class MainWindow(QMainWindow):
             if cw is not None:
                 cw.append_protocol_command(line)
             elif source != "repl":
-                self._parawiz_protocol_backlog.append(("cmd", line))
+                _cmd_log = line
+                if len(_cmd_log) > _PARAWIZ_PROTOCOL_BACKLOG_CMD_CHARS:
+                    _cmd_log = (
+                        _cmd_log[:_PARAWIZ_PROTOCOL_BACKLOG_CMD_CHARS]
+                        + f"\n... [truncated, command was {len(line)} chars]"
+                    )
+                self._parawiz_protocol_backlog.append(("cmd", _cmd_log))
                 if len(self._parawiz_protocol_backlog) > 2000:
                     self._parawiz_protocol_backlog = self._parawiz_protocol_backlog[-2000:]
+        if source == "parawiz-select" and len(line) > 500:
+            # region agent log
+            _parawiz_agent_ndjson(
+                hypothesis_id="H2",
+                location="main_window._parawiz_execute_ccp",
+                message="before_controller_execute",
+                data={"line_chars": len(line)},
+            )
+            # endregion
+        if source == "parawiz" and line.split(None, 1)[0].lower() == "cp":
+            # region agent log
+            _parawiz_agent_ndjson(
+                hypothesis_id="H4",
+                location="main_window._parawiz_execute_ccp",
+                message="before_cp_execute",
+                data={"line_chars": len(line), "head": line[:120]},
+            )
+            # endregion
         try:
             out = self._controller.execute(line)
         except CommandError as exc:
@@ -1711,8 +1857,48 @@ class MainWindow(QMainWindow):
                 self._parawiz_protocol_backlog.append(("out", str(out)))
                 if len(self._parawiz_protocol_backlog) > 2000:
                     self._parawiz_protocol_backlog = self._parawiz_protocol_backlog[-2000:]
+        if source == "parawiz-select" and len(line) > 500:
+            # region agent log
+            _parawiz_agent_ndjson(
+                hypothesis_id="H1",
+                location="main_window._parawiz_execute_ccp",
+                message="after_controller_execute",
+                data={
+                    "line_chars": len(line),
+                    "out_chars": len(str(out or "")),
+                    "refresh_overlay": bool(refresh_selection_overlay),
+                },
+            )
+            # endregion
+        if source == "parawiz" and line.split(None, 1)[0].lower() == "cp":
+            # region agent log
+            _parawiz_agent_ndjson(
+                hypothesis_id="H4",
+                location="main_window._parawiz_execute_ccp",
+                message="after_cp_execute",
+                data={"line_chars": len(line), "out_chars": len(str(out or ""))},
+            )
+            # endregion
         if refresh_selection_overlay:
+            # region agent log
+            if source == "parawiz-select" and len(line) > 500:
+                _parawiz_agent_ndjson(
+                    hypothesis_id="H2",
+                    location="main_window._parawiz_execute_ccp",
+                    message="before_refresh_selection_overlay",
+                    data={"line_chars": len(line)},
+                )
+            # endregion
             self._parawiz_refresh_model_selection_overlay()
+            # region agent log
+            if source == "parawiz-select" and len(line) > 500:
+                _parawiz_agent_ndjson(
+                    hypothesis_id="H2",
+                    location="main_window._parawiz_execute_ccp",
+                    message="after_refresh_selection_overlay",
+                    data={"line_chars": len(line)},
+                )
+            # endregion
         return out
 
     @staticmethod
@@ -2586,51 +2772,22 @@ class MainWindow(QMainWindow):
                     it_target.setIcon(icon_t)
                     it_target.setData(Qt.ItemDataRole.UserRole, str(pid_t))
                     src_col_for_target = self._parawiz_target_copy_source_col_by_pid.get(pid_t)
+                    # Nur einfärben/fett, wenn die Quellzelle in dieser Zeile wirklich eine Vergleichsfarbe hat
+                    # (nicht neutral/schwarz — sonst wäre Quelle=Ziel ohne sichtbaren Unterschied).
+                    _src_cell_fg = (
+                        st.dataset_col_fg.get(src_col_for_target)
+                        if src_col_for_target is not None
+                        else None
+                    )
+                    _show_copy_hue = src_col_for_target is not None and _src_cell_fg is not None
                     fn_t = QFont(self._table.font())
-                    fn_t.setBold(src_col_for_target is not None)
+                    fn_t.setBold(_show_copy_hue)
                     it_target.setFont(fn_t)
                     _tfg = None
-                    if src_col_for_target is not None:
-                        # Quellspalte stabil kodieren (nicht clusterabhängig), damit Copy-Herkunft sichtbar bleibt.
+                    if _show_copy_hue:
                         _tfg = QColor(
                             _PARAWIZ_DIFF_CLUSTER_HEX[src_col_for_target % len(_PARAWIZ_DIFF_CLUSTER_HEX)]
                         )
-                    # region agent log
-                    try:
-                        import time as _agent_time
-
-                        _dbg_path = Path(__file__).resolve().parents[4] / "debug-788002.log"
-                        with _dbg_path.open("a", encoding="utf-8") as _df:
-                            _df.write(
-                                json.dumps(
-                                    {
-                                        "sessionId": "788002",
-                                        "runId": "post-fix-color",
-                                        "hypothesisId": "H10",
-                                        "timestamp": int(_agent_time.time() * 1000),
-                                        "location": "main_window._populate_table_rows:target_color",
-                                        "message": "target_color_from_source_col",
-                                        "data": {
-                                            "row": tr,
-                                            "pid_t": str(pid_t),
-                                            "src_col_for_target": src_col_for_target,
-                                            "source_color_hex": (
-                                                _PARAWIZ_DIFF_CLUSTER_HEX[
-                                                    src_col_for_target % len(_PARAWIZ_DIFF_CLUSTER_HEX)
-                                                ]
-                                                if src_col_for_target is not None
-                                                else None
-                                            ),
-                                            "has_color": _tfg is not None,
-                                        },
-                                    },
-                                    default=str,
-                                )
-                                + "\n"
-                            )
-                    except Exception:
-                        pass
-                    # endregion
                     if _tfg is not None:
                         it_target.setForeground(QBrush(_tfg))
                     self._table_target.setItem(tr, 0, it_target)
@@ -2799,15 +2956,25 @@ class MainWindow(QMainWindow):
         delete_progress: bool = False,
         fit_window: bool = True,
         on_layout_complete: Callable[[], None] | None = None,
+        profile_copy: bool = False,
     ) -> None:
         """Tabelle aus Modell neu; Hostbreite/Scroll nach CCP (z. B. ``del``) synchron.
 
         Passt die geänderte Spaltenzahl an.
         ``on_layout_complete`` läuft nach erstem Layout/Viewport-Update (``QTimer(0)``), z. B. Selektion löschen.
         """
+        _t_mut0 = time.perf_counter()
         self._refresh_table(delete_table_progress=delete_progress, fit_window=fit_window)
+        if profile_copy and _parawiz_profile_copy_enabled():
+            _parawiz_profile_copy_log(
+                "refresh_after_mutation: sync_refresh_table_ms=%.1f"
+                % ((time.perf_counter() - _t_mut0) * 1000.0,)
+            )
+
+        _t_after_sync = time.perf_counter()
 
         def _post_refresh() -> None:
+            _t_cb0 = time.perf_counter()
             self._parawiz_reapply_param_table_host_width_after_layout(fit_window=fit_window)
             for tw in (
                 self._table,
@@ -2820,6 +2987,14 @@ class MainWindow(QMainWindow):
                 tw.viewport().update()
             if on_layout_complete is not None:
                 on_layout_complete()
+            if profile_copy and _parawiz_profile_copy_enabled():
+                _parawiz_profile_copy_log(
+                    "refresh_after_mutation: post_layout_timer_cb_ms=%.1f since_sync_refresh_ms=%.1f"
+                    % (
+                        (time.perf_counter() - _t_cb0) * 1000.0,
+                        (time.perf_counter() - _t_after_sync) * 1000.0,
+                    )
+                )
 
         QTimer.singleShot(0, _post_refresh)
 
@@ -2886,6 +3061,34 @@ class MainWindow(QMainWindow):
             return None
         return str(getattr(obj, "hash_name", "")) or None
 
+    def _parawiz_hash_name_map_from_model_selection(self) -> dict[UUID, str]:
+        """``pid → hash_name`` aus der aktuellen Modell-Selektion (ohne ``find_by_id`` pro Parameter)."""
+        out: dict[UUID, str] = {}
+        for obj in self._controller.selection:
+            oid = getattr(obj, "id", None)
+            if oid is None:
+                continue
+            hn = getattr(obj, "hash_name", None)
+            if hn is None or not str(hn).strip():
+                continue
+            try:
+                u = oid if isinstance(oid, UUID) else UUID(str(oid))
+            except (ValueError, TypeError):
+                continue
+            out[u] = str(hn)
+        return out
+
+    def _parawiz_cal_param_hash_name_set_from_selection(self) -> set[str]:
+        """``hash_name`` aller ``MODEL.CAL_PARAM`` in der Modell-Selektion (für Kopier-Vergleich)."""
+        out: set[str] = set()
+        for obj in self._controller.selection:
+            if self._controller._node_model_type(obj) != "MODEL.CAL_PARAM":
+                continue
+            hn = getattr(obj, "hash_name", None)
+            if hn is not None and str(hn).strip():
+                out.add(str(hn))
+        return out
+
     def _parawiz_selected_pid_str_set(self) -> set[str]:
         """String-IDs der Modell-Selektion (wie CCP ``select``) — für Tabellenzeilen-Zuordnung zuverlässig."""
         out: set[str] = set()
@@ -2924,6 +3127,19 @@ class MainWindow(QMainWindow):
 
     def _parawiz_refresh_model_selection_overlay(self) -> None:
         """Modell-Selektion (``select``) wird nur per Delegate übermalt, nicht als Qt-Selection."""
+        # region agent log
+        _nr = int(self._table.rowCount())
+        if _nr > 500:
+            _parawiz_agent_ndjson(
+                hypothesis_id="H2",
+                location="main_window._parawiz_refresh_model_selection_overlay",
+                message="viewport_update_start",
+                data={
+                    "table_rows": _nr,
+                    "n_model_sel": len(getattr(self._controller, "selection", []) or []),
+                },
+            )
+        # endregion
         self._table.viewport().update()
         self._table_target.viewport().update()
 
@@ -3050,9 +3266,28 @@ class MainWindow(QMainWindow):
                     refs.append(ref)
             if not refs:
                 return 0
-            cmd = "select " + " ".join(shlex.quote(r) for r in refs)
+            select_lines = _parawiz_build_ccp_select_lines(
+                refs, max_cmd_chars=self._PARAWIZ_CCP_CMD_MAX_TOTAL
+            )
+            # region agent log
+            _parawiz_agent_ndjson(
+                hypothesis_id="H3",
+                location="main_window._parawiz_select_parameter_ids",
+                message="branch_replace_selection",
+                data={
+                    "n_refs": len(refs),
+                    "n_lines": len(select_lines),
+                    "max_line_chars": max(len(x) for x in select_lines) if select_lines else 0,
+                },
+            )
+            # endregion
             try:
-                self._parawiz_execute_ccp(cmd, source="parawiz-select")
+                for _si, _ln in enumerate(select_lines):
+                    self._parawiz_execute_ccp(
+                        _ln,
+                        source="parawiz-select",
+                        refresh_selection_overlay=_si == len(select_lines) - 1,
+                    )
             except CommandError as exc:
                 self.statusBar().showMessage(f"Selektion fehlgeschlagen: {exc}", 5000)
                 return 0
@@ -3066,11 +3301,28 @@ class MainWindow(QMainWindow):
                     refs_bulk.append(ref)
             if not refs_bulk:
                 return 0
+            select_lines = _parawiz_build_ccp_select_lines(
+                refs_bulk, max_cmd_chars=self._PARAWIZ_CCP_CMD_MAX_TOTAL
+            )
+            # region agent log
+            _parawiz_agent_ndjson(
+                hypothesis_id="H3",
+                location="main_window._parawiz_select_parameter_ids",
+                message="branch_bulk_append",
+                data={
+                    "n_refs": len(refs_bulk),
+                    "n_lines": len(select_lines),
+                    "max_line_chars": max(len(x) for x in select_lines) if select_lines else 0,
+                },
+            )
+            # endregion
             try:
-                self._parawiz_execute_ccp(
-                    "select -p " + " ".join(shlex.quote(r) for r in refs_bulk),
-                    source="parawiz-select",
-                )
+                for _si, _ln in enumerate(select_lines):
+                    self._parawiz_execute_ccp(
+                        _ln,
+                        source="parawiz-select",
+                        refresh_selection_overlay=_si == len(select_lines) - 1,
+                    )
             except CommandError as exc:
                 self.statusBar().showMessage(f"Selektion fehlgeschlagen: {exc}", 5000)
                 return 0
@@ -3103,16 +3355,37 @@ class MainWindow(QMainWindow):
         add_refs = [r for pid in effective if (r := self._parawiz_hash_name_for_parameter_id(pid))]
         if not add_refs:
             return 0
+        # region agent log
+        _parawiz_agent_ndjson(
+            hypothesis_id="H3",
+            location="main_window._parawiz_select_parameter_ids",
+            message="branch_row_uniqueness",
+            data={
+                "n_rm_refs": len(rm_refs),
+                "n_add_refs": len(add_refs),
+                "n_effective_pids": len(effective),
+            },
+        )
+        # endregion
         try:
             if rm_refs:
-                self._parawiz_execute_ccp(
-                    "select -m " + " ".join(shlex.quote(r) for r in rm_refs),
-                    source="parawiz-select",
-                )
-            self._parawiz_execute_ccp(
-                "select -p " + " ".join(shlex.quote(r) for r in add_refs),
-                source="parawiz-select",
+                for _ln in _parawiz_build_ccp_minus_m_lines(
+                    rm_refs, max_cmd_chars=self._PARAWIZ_CCP_CMD_MAX_TOTAL
+                ):
+                    self._parawiz_execute_ccp(
+                        _ln,
+                        source="parawiz-select",
+                        refresh_selection_overlay=False,
+                    )
+            add_lines = _parawiz_build_ccp_select_lines(
+                add_refs, max_cmd_chars=self._PARAWIZ_CCP_CMD_MAX_TOTAL
             )
+            for _si, _ln in enumerate(add_lines):
+                self._parawiz_execute_ccp(
+                    _ln,
+                    source="parawiz-select",
+                    refresh_selection_overlay=_si == len(add_lines) - 1,
+                )
         except CommandError as exc:
             self.statusBar().showMessage(f"Selektion fehlgeschlagen: {exc}", 5000)
             return 0
@@ -3126,6 +3399,14 @@ class MainWindow(QMainWindow):
             if hit is None:
                 continue
             pids.append(hit[2])
+        # region agent log
+        _parawiz_agent_ndjson(
+            hypothesis_id="H1",
+            location="main_window._parawiz_select_filtered_dataset_parameters",
+            message="dataset_select_start",
+            data={"n_pids": len(pids), "append": append},
+        )
+        # endregion
         n = self._parawiz_select_parameter_ids(
             pids, append=append, enforce_row_uniqueness=False
         )
@@ -3313,10 +3594,15 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Kein Target-DataSet: Referenz konnte nicht aufgelöst werden.", 7000)
             return
 
+        _prof_cp = _parawiz_profile_copy_enabled()
+        _t_cp0 = time.perf_counter()
+
         rows_list = self._parawiz_filtered_rows_list()
         datasets = self._cached_datasets
         ad_id_cp = sid
+        _t_m = time.perf_counter()
         sel_rows_sorted = sorted(self._parawiz_filtered_rows_matching_model_selection())
+        _t_after_match = time.perf_counter()
         pid_set_cp = self._parawiz_selected_pid_str_set()
         sel_refs: list[str] = []
         if (
@@ -3324,6 +3610,7 @@ class MainWindow(QMainWindow):
             and len(datasets) > 0
             and len(datasets) == self._table.columnCount()
         ):
+            _hn_by_pid = self._parawiz_hash_name_map_from_model_selection()
             for tr in sel_rows_sorted:
                 for sci in self._parawiz_copy_source_column_indices_for_row(
                     tr, ad_id_cp, pid_set=pid_set_cp, rows_list=rows_list
@@ -3334,7 +3621,10 @@ class MainWindow(QMainWindow):
                     hit = by_ds.get(datasets[sci][1])
                     if hit is None:
                         continue
-                    ref = self._parawiz_hash_name_for_parameter_id(hit[2])
+                    _pid = hit[2]
+                    ref = _hn_by_pid.get(_pid)
+                    if ref is None:
+                        ref = self._parawiz_hash_name_for_parameter_id(_pid)
                     if ref:
                         sel_refs.append(ref)
             _seen_ref: set[str] = set()
@@ -3346,16 +3636,35 @@ class MainWindow(QMainWindow):
                     8000,
                 )
                 return
+        _t_after_build_refs = time.perf_counter()
         if not sel_refs:
+            _t_fb0 = time.perf_counter()
             for obj in self._controller.selection:
                 if not isinstance(obj, ComplexInstance) or obj.id is None:
                     continue
                 if self._controller._node_model_type(obj) != "MODEL.CAL_PARAM":
                     continue
                 sel_refs.append(obj.hash_name)
+            if _prof_cp:
+                _parawiz_profile_copy_log(
+                    "prepare: fallback_refs_from_selection_ms=%.1f n_refs=%d"
+                    % ((time.perf_counter() - _t_fb0) * 1000.0, len(sel_refs))
+                )
         if not sel_refs:
             self.statusBar().showMessage("Keine lila Modell-Selektion vorhanden.", 5000)
             return
+
+        if _prof_cp:
+            _parawiz_profile_copy_log(
+                "prepare: filtered_rows=%d sel_rows=%d n_refs=%d match_model_rows_ms=%.1f build_sel_refs_ms=%.1f"
+                % (
+                    len(rows_list),
+                    len(sel_rows_sorted),
+                    len(sel_refs),
+                    (_t_after_match - _t_m) * 1000.0,
+                    (_t_after_build_refs - _t_after_match) * 1000.0,
+                )
+            )
 
         self._parawiz_copy_in_progress = True
         n_ok = 0
@@ -3364,20 +3673,70 @@ class MainWindow(QMainWindow):
         skip_benign_lines: list[str] = []
         skip_other_lines: list[str] = []
         try:
+            _t_sl0 = time.perf_counter()
             select_lines = _parawiz_build_ccp_select_lines(
                 sel_refs, max_cmd_chars=self._PARAWIZ_CCP_CMD_MAX_TOTAL
             )
-            for _si, _line in enumerate(select_lines):
-                self._parawiz_execute_ccp(
-                    _line,
-                    source="parawiz-select",
-                    refresh_selection_overlay=_si == len(select_lines) - 1,
+            if _prof_cp:
+                _parawiz_profile_copy_log(
+                    "ccp: build_select_lines_ms=%.1f n_lines=%d"
+                    % ((time.perf_counter() - _t_sl0) * 1000.0, len(select_lines))
                 )
+            _want_refs = set(sel_refs)
+            _have_refs = self._parawiz_cal_param_hash_name_set_from_selection()
+            _skip_ccp_reselect = len(_want_refs) > 0 and _want_refs == _have_refs
+            if _prof_cp and _skip_ccp_reselect:
+                _parawiz_profile_copy_log(
+                    "ccp: skip_reselect_identical n_refs=%d (Modell-Selektion = Kopierliste)"
+                    % (len(sel_refs),)
+                )
+            _t_sel_total0 = time.perf_counter()
+            if not _skip_ccp_reselect:
+                for _si, _line in enumerate(select_lines):
+                    _t_one = time.perf_counter()
+                    self._parawiz_execute_ccp(
+                        _line,
+                        source="parawiz-select",
+                        refresh_selection_overlay=_si == len(select_lines) - 1,
+                    )
+                    _app = QApplication.instance()
+                    if _app is not None:
+                        _app.processEvents()
+                    if _prof_cp:
+                        _ln = len(_line)
+                        _prev = _line[:120] + ("…" if _ln > 120 else "")
+                        _parawiz_profile_copy_log(
+                            "ccp: select line %d/%d cmd_chars=%d ms=%.1f preview=%r"
+                            % (
+                                _si + 1,
+                                len(select_lines),
+                                _ln,
+                                (time.perf_counter() - _t_one) * 1000.0,
+                                _prev,
+                            )
+                        )
+            if _prof_cp:
+                _parawiz_profile_copy_log(
+                    "ccp: select_total_ms=%.1f (n_lines=%d skipped=%s)"
+                    % (
+                        (time.perf_counter() - _t_sel_total0) * 1000.0,
+                        len(select_lines),
+                        _skip_ccp_reselect,
+                    )
+                )
+            _t_cp_cmd = time.perf_counter()
             out = self._parawiz_execute_ccp(
                 f"cp @selection {shlex.quote(target_ref)}",
                 source="parawiz",
                 refresh_selection_overlay=False,
             )
+            if _prof_cp:
+                _out_s = str(out or "")
+                _parawiz_profile_copy_log(
+                    "ccp: cp_at_selection_ms=%.1f out_chars=%d"
+                    % ((time.perf_counter() - _t_cp_cmd) * 1000.0, len(_out_s))
+                )
+            _t_pay0 = time.perf_counter()
             payload = json.loads(str(out or "{}"))
             n_ok = int(payload.get("copied", 0))
             n_skip = int(payload.get("skipped", 0))
@@ -3426,10 +3785,18 @@ class MainWindow(QMainWindow):
                         skip_benign_lines.append(_line)
                     else:
                         skip_other_lines.append(_line)
+            if _prof_cp:
+                _parawiz_profile_copy_log(
+                    "ccp: apply_payload_and_metadata_ms=%.1f"
+                    % ((time.perf_counter() - _t_pay0) * 1000.0,)
+                )
         except (CommandError, ValueError, TypeError, json.JSONDecodeError) as exc:
             errs = [str(exc)]
+            if _prof_cp:
+                _parawiz_profile_copy_log("ccp: exception %s" % type(exc).__name__)
         finally:
             self._parawiz_copy_in_progress = False
+            self._dcm_import_remove_progress_bar()
 
         def _clear_sel_after_copy_layout() -> None:
             self._table.clearSelection()
@@ -3449,7 +3816,13 @@ class MainWindow(QMainWindow):
             delete_progress=False,
             fit_window=False,
             on_layout_complete=_clear_sel_after_copy_layout,
+            profile_copy=True,
         )
+        if _prof_cp:
+            _parawiz_profile_copy_log(
+                "copy: total_ms_through_sync_refresh=%.1f n_ok=%d n_skip=%d n_err=%d"
+                % ((time.perf_counter() - _t_cp0) * 1000.0, n_ok, n_skip, len(errs))
+            )
         parts = [f"{n_ok} kopiert", f"{n_skip} übersprungen", f"{len(errs)} Fehler"]
         _status_txt = " · ".join(parts)
         _status_ms = 8000

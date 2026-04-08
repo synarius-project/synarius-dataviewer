@@ -11,6 +11,8 @@ from synariustools.tools.terminal_console import TerminalConsoleWidget
 
 # Sehr große CCP-Ausgaben (z. B. ``ls`` im Wurzelverzeichnis) als eine Zeile → Speicher/Widgets belasten.
 _MAX_REPL_OUTPUT_CHARS = 120_000
+# Protokoll: riesige ``select``/``select -p``-Zeilen (Zehntausend Refs) → Terminal-Widget/Qt
+_MAX_PROTOCOL_CMD_CHARS = 24_000
 DEFAULT_OUTPUT_COLOR = "#ADD8E6"
 DEFAULT_PROMPT_COLOR = "#90EE90"
 DEFAULT_ERROR_COLOR = "#FF6666"
@@ -75,7 +77,13 @@ class ConsoleWindow(QMainWindow):
         self._console.insert_log_before_current_prompt(text, color)
 
     def append_protocol_command(self, cmd: str) -> None:
-        self._insert_log(f"{self._prompt_provider()}> {cmd.strip()}", DEFAULT_PROMPT_COLOR)
+        s = cmd.strip()
+        if len(s) > _MAX_PROTOCOL_CMD_CHARS:
+            s = (
+                s[:_MAX_PROTOCOL_CMD_CHARS]
+                + f"\n... [truncated, command was {len(cmd.strip())} chars]"
+            )
+        self._insert_log(f"{self._prompt_provider()}> {s}", DEFAULT_PROMPT_COLOR)
 
     def append_protocol_result(self, result: str) -> None:
         rs = str(result)

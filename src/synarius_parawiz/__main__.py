@@ -40,13 +40,19 @@ def main() -> int:
         )
     if os.environ.get("SYNARIUS_PARAWIZ_PROFILE", "").strip().lower() in ("1", "true", "yes", "on"):
         print(
-            "ParaWiz: SYNARIUS_PARAWIZ_PROFILE aktiv — Laufzeitzeilen (collect/populate/refresh) auf stderr.",
+            "ParaWiz: SYNARIUS_PARAWIZ_PROFILE aktiv — Laufzeitzeilen (collect/populate/refresh + Kopieren) auf stderr.",
             file=sys.stderr,
             flush=True,
         )
         print(
             "ParaWiz: Cross-Dataset-Farben optional SYNARIUS_PARAWIZ_CROSS_STYLE_MAX_ROWS "
             "(Standard 12000; Namensfilter reduziert Aufwand).",
+            file=sys.stderr,
+            flush=True,
+        )
+    elif os.environ.get("SYNARIUS_PARAWIZ_PROFILE_COPY", "").strip().lower() in ("1", "true", "yes", "on"):
+        print(
+            "ParaWiz: SYNARIUS_PARAWIZ_PROFILE_COPY aktiv — nur Kopier-Pfad (parawiz profile copy: …) auf stderr.",
             file=sys.stderr,
             flush=True,
         )
