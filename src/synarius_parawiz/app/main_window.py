@@ -58,14 +58,13 @@ from synarius_core.model.data_model import ComplexInstance
 from synarius_core.parameters.repository import (
     ParameterCompareFingerprints,
     ParameterRecord,
-    ParametersRepository,
 )
 
 import synarius_parawiz as _synarius_parawiz_pkg
 from synarius_dataviewer.app import theme
 from synarius_parawiz._version import __version__
-from synarius_parawiz.app.console_window import ConsoleWindow
 from synarius_parawiz.app.compat_table_view import CompatTableView
+from synarius_parawiz.app.console_window import ConsoleWindow
 from synarius_parawiz.app.icon_utils import parawiz_app_icon
 from synarius_parawiz.app.parameter_compare_logic import (
     RowCompareSnapshot,
@@ -698,6 +697,21 @@ class MainWindow(QMainWindow):
         return abs(vx - bx) <= MainWindow._PARAWIZ_COL_RESIZE_EDGE_PX
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]
+        try:
+            return self._parawiz_event_filter_impl(watched, event)
+        except KeyboardInterrupt:
+            raise
+        except SystemExit:
+            raise
+        except BaseException:
+            _LOG_PERF.exception(
+                "ParaWiz eventFilter: unhandled exception (watched=%r QEvent.Type=%s)",
+                watched,
+                event.type(),
+            )
+            return False
+
+    def _parawiz_event_filter_impl(self, watched: QObject, event: QEvent) -> bool:
         tw = self._table
         th = self._table_header
         tfr = self._table_frozen
@@ -1684,7 +1698,7 @@ class MainWindow(QMainWindow):
                 if len(self._parawiz_protocol_backlog) > 2000:
                     self._parawiz_protocol_backlog = self._parawiz_protocol_backlog[-2000:]
             raise
-        # REPL: Ergebnisse immer anzeigen (want_log ist absichtlich False, damit Befehle nicht doppelt im Protokoll landen).
+        # REPL: Ergebnisse immer anzeigen (want_log absichtlich False — keine doppelten Protokoll-Zeilen).
         if source == "repl" and cw is not None and out is not None:
             _text = str(out)
             if _text == "":
@@ -1921,7 +1935,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _parawiz_compare_meta_fingerprint(fp: ParameterCompareFingerprints) -> tuple:
-        # Ohne source_identifier: DCM-/Import-Provenance soll Tabellenfarben nicht von echten Wert-Unterschieden trennen.
+        # Ohne source_identifier: DCM-/Import-Provenance nicht von echten Wert-Unterschieden trennen.
         if fp.is_text:
             return (str(fp.category).upper(),)
         return (
@@ -2948,7 +2962,10 @@ class MainWindow(QMainWindow):
         return out
 
     def _parawiz_pid_for_frozen_row_model_action(self, row: int) -> UUID | None:
-        """Namenspalte (Alt+Klick / Kontext): nicht nur erster Satz — Selektion in der Zeile oder zuletzt fokussierte Datenspalte."""
+        """Namenspalte (Alt+Klick / Kontext): nicht nur erster Satz.
+
+        Selektion in der Zeile oder zuletzt fokussierte Datenspalte.
+        """
         sel_in = self._parawiz_selected_pids_in_row(row)
         if len(sel_in) >= 1:
             return sel_in[0]
@@ -3225,7 +3242,10 @@ class MainWindow(QMainWindow):
         return []
 
     def _parawiz_scratch_dataset_id(self) -> UUID | None:
-        """UUID von ``parawiz_target`` — unabhängig von ``active_dataset_name`` (die erste DCM-Registrierung setzt diese oft)."""
+        """UUID von ``parawiz_target``.
+
+        Unabhängig von ``active_dataset_name`` (erste DCM-Registrierung setzt diese oft).
+        """
         try:
             rt = self._controller.model.parameter_runtime()
             rt.ensure_tree()
@@ -3245,7 +3265,10 @@ class MainWindow(QMainWindow):
         return None
 
     def _parawiz_ensure_target_scratch_dataset(self) -> None:
-        """Leeren Zieldatensatz ``parawiz_target`` anlegen und in DuckDB registrieren — direkt am Modellbaum, ohne CCP-``cd``."""
+        """Leeren Zieldatensatz ``parawiz_target`` anlegen und in DuckDB registrieren.
+
+        Direkt am Modellbaum, ohne CCP-``cd``.
+        """
         rt = self._controller.model.parameter_runtime()
         rt.ensure_tree()
         ds_root = rt.data_sets_root()
@@ -3254,7 +3277,6 @@ class MainWindow(QMainWindow):
             if isinstance(c, ComplexInstance) and c.name == PARAWIZ_TARGET_DATASET_NAME and c.id is not None:
                 existing = c
                 break
-        created = existing is None
         if existing is None:
             node = ComplexInstance(name=PARAWIZ_TARGET_DATASET_NAME)
             self._controller.model.attach(node, parent=ds_root, reserve_existing=False, remap_ids=False)

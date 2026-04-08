@@ -75,9 +75,12 @@ from synariustools.tools.plotwidget.plot_theme import (
 from synariustools.tools.plotwidget.svg_icons import icon_from_tinted_svg_file
 
 hv.extension("matplotlib")
+# Calibration MAP axes are often unevenly spaced (>5% spread in np.diff); HoloViews Surface/Image
+# uses validate_regular_sampling with this rtol (see holoviews.core.util). Default in hv is 1e-3; 0.25
+# matches typical DCM breakpoint tables without switching to QuadMesh for every map.
+_HV_SURFACE_RTOL = 0.25
 try:
-    # Irreguläre Achsen-Stützstellen: Surface-Warnung „not evenly sampled“ unterdrücken (pro Prozess).
-    hv.config.image_rtol = 0.05
+    hv.config.image_rtol = _HV_SURFACE_RTOL
 except Exception:
     pass
 
@@ -1985,7 +1988,12 @@ class CalibrationMapWidget(QWidget):
             z_flat = vals[L, K].ravel()
             fin = np.isfinite(px) & np.isfinite(py) & np.isfinite(z_flat)
 
-            surf = hv.Surface((a0, a1, vals.T), kdims=[axis0_label, axis1_label], vdims=[value_label])
+            surf = hv.Surface(
+                (a0, a1, vals.T),
+                kdims=[axis0_label, axis1_label],
+                vdims=[value_label],
+                rtol=_HV_SURFACE_RTOL,
+            )
             surf = surf.opts(
                 opts.Surface(
                     title="",
@@ -2018,7 +2026,12 @@ class CalibrationMapWidget(QWidget):
                 a0b = np.arange(n0, dtype=np.float64)
             if len(a1b) != n1:
                 a1b = np.arange(n1, dtype=np.float64)
-            surf_b = hv.Surface((a0b, a1b, vals_b.T), kdims=[axis0_label, axis1_label], vdims=[value_label])
+            surf_b = hv.Surface(
+                (a0b, a1b, vals_b.T),
+                kdims=[axis0_label, axis1_label],
+                vdims=[value_label],
+                rtol=_HV_SURFACE_RTOL,
+            )
             surf_b = surf_b.opts(
                 opts.Surface(
                     title="",

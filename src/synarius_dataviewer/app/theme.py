@@ -75,6 +75,7 @@ def studio_toolbar_stylesheet() -> str:
         f"QToolBar QToolButton:pressed {{ background-color: {tb_pressed}; }}"
         f"QToolBar QToolButton:checked {{ background-color: {action_checked}; }}"
         f"QToolBar QToolButton:checked:hover {{ background-color: {action_checked}; }}"
+        f"QToolBar QToolButton::menu-indicator {{ image: none; width: 0px; height: 0px; }}"
         f"QToolBar QComboBox {{ color: {fg}; background-color: {combo_bg}; border: 1px solid {bdr};"
         f" border-radius: 3px; padding: 2px 8px; min-height: 20px; }}"
         f"QToolBar QComboBox:hover {{ background-color: {combo_hover}; }}"

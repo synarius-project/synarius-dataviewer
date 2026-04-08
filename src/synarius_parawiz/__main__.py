@@ -45,7 +45,8 @@ def main() -> int:
             flush=True,
         )
         print(
-            "ParaWiz: Cross-Dataset-Farben optional SYNARIUS_PARAWIZ_CROSS_STYLE_MAX_ROWS (Standard 12000; Namensfilter reduziert Aufwand).",
+            "ParaWiz: Cross-Dataset-Farben optional SYNARIUS_PARAWIZ_CROSS_STYLE_MAX_ROWS "
+            "(Standard 12000; Namensfilter reduziert Aufwand).",
             file=sys.stderr,
             flush=True,
         )
