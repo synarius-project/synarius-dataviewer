@@ -115,7 +115,7 @@ jobs:
                             WorkingDirectory="INSTALLFOLDER"
                             Icon="DataviewerAppIcon" />
                   <RemoveFolder Id="ApplicationProgramsFolderRemove" On="uninstall" />
-                  <RegistryValue Root="HKLM"
+                  <RegistryValue Root="HKCU"
                                  Key="Software\Synarius\synarius-apps"
                                  Name="StartMenuShortcut"
                                  Type="integer"
