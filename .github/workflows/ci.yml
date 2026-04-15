@@ -33,6 +33,8 @@ jobs:
           python-version: "3.11"
       - run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Clone synarius-core sibling (required for file:../synarius-core dep)
+        run: git clone --depth 1 https://github.com/synarius-project/synarius-core.git "$(dirname "${GITHUB_WORKSPACE}")/synarius-core"
       - run: pip install --upgrade pip
       - run: pip install ".[dev]" ruff
       - run: ruff check .
