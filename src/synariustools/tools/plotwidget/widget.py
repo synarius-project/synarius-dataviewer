@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Literal, cast
@@ -10,6 +15,7 @@ import numpy as np
 from PySide6.QtCore import QEvent, QMimeData, QObject, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QPen
 from PySide6.QtWidgets import (
+    QApplication,
     QAbstractItemView,
     QCheckBox,
     QFileDialog,
@@ -20,6 +26,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSizePolicy,
     QSplitter,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QToolBar,
@@ -50,6 +57,49 @@ from synariustools.tools.plotwidget.series_math import (
     latest_y,
 )
 from synariustools.tools.plotwidget.svg_icons import icon_from_tinted_svg_file
+
+_AGENT_DEBUG_LOG = logging.getLogger("synariustools.plotwidget.dataviewer_debug")
+
+
+def _agent_debug_log(payload: dict) -> None:
+    # region agent log
+    line = json.dumps(
+        {**payload, "sessionId": "5b73b8", "timestamp": int(time.time() * 1000)},
+        ensure_ascii=False,
+    ) + "\n"
+    here = Path(__file__).resolve()
+    candidates: list[Path] = []
+    if len(here.parents) > 5:
+        candidates.append(here.parents[5] / "debug-5b73b8.log")
+    for ancestor in here.parents:
+        if (ancestor / "synarius-studio").is_dir() and (ancestor / "synarius-apps").is_dir():
+            p = ancestor / "debug-5b73b8.log"
+            if p not in candidates:
+                candidates.append(p)
+            break
+    candidates.append(Path.cwd() / "debug-5b73b8.log")
+    for path in candidates:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line)
+            break
+        except OSError:
+            continue
+    try:
+        req = urllib.request.Request(
+            "http://127.0.0.1:7896/ingest/1bdff9f9-69e9-4a68-aee6-24c13d2e9952",
+            data=line.encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "5b73b8",
+            },
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=1)
+    except (urllib.error.URLError, TimeoutError, OSError):
+        pass
+    # endregion agent log
 
 
 def _find_window_host(widget: QWidget) -> QWidget | None:
@@ -190,17 +240,15 @@ class DataViewerWidget(QWidget):
         act_adjust.triggered.connect(self._on_adjust)
         self._adjust_action = act_adjust
 
-        act_save = self._toolbar.addAction("Save")
-        studio_save_icon = (
-            Path(__file__).resolve().parents[5]
-            / "synarius-studio"
-            / "src"
-            / "synarius_studio"
-            / "icons"
-            / "document-save-symbolic.svg"
-        )
-        if studio_save_icon.exists():
-            act_save.setIcon(icon_from_tinted_svg_file(studio_save_icon, icon_fg))
+        act_save = self._toolbar.addAction("")
+        _save_svg = icons_dir / "document-save.svg"
+        act_save.setIcon(icon_from_tinted_svg_file(_save_svg, icon_fg))
+        _save_used_std_fallback = False
+        if act_save.icon().isNull():
+            app = QApplication.instance()
+            if app is not None:
+                act_save.setIcon(app.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
+                _save_used_std_fallback = not act_save.icon().isNull()
         act_save.setToolTip("Save visible channels")
         act_save.triggered.connect(self._on_save_visible_channels)
         self._save_action = act_save
@@ -218,6 +266,36 @@ class DataViewerWidget(QWidget):
             self._walk_action.setCheckable(True)
             self._walk_action.setToolTip("Keep a rolling time window on the X axis")
             self._walk_action.toggled.connect(self._on_walk_toggled)
+
+        self._toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+
+        # region agent log
+        _sz = _save_svg.stat().st_size if _save_svg.is_file() else None
+        _ic = act_save.icon()
+        _dbg_payload = {
+            "hypothesisId": "H1-H5",
+            "runId": "post-fix",
+            "location": "plotwidget/widget.py:DataViewerWidget.__init__",
+            "message": "save toolbar action resolved",
+            "data": {
+                "widget_file": str(Path(__file__).resolve()),
+                "icons_dir": str(icons_dir),
+                "save_svg": str(_save_svg),
+                "save_svg_exists": _save_svg.is_file(),
+                "save_svg_bytes": _sz,
+                "icon_is_null": _ic.isNull(),
+                "save_used_sp_dialog_fallback": _save_used_std_fallback,
+                "icon_available_sizes": [[s.width(), s.height()] for s in _ic.availableSizes()],
+                "toolbar_tool_button_style": int(self._toolbar.toolButtonStyle()),
+                "save_action_text": act_save.text(),
+            },
+        }
+        _agent_debug_log(_dbg_payload)
+        _AGENT_DEBUG_LOG.info(
+            "dataviewer_save_toolbar %s",
+            json.dumps(_dbg_payload["data"], ensure_ascii=False),
+        )
+        # endregion agent log
 
         layout.addWidget(self._toolbar)
 

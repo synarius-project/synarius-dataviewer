@@ -2,8 +2,8 @@ Diagnostics and crash logs
 ==========================
 
 Synarius GUI applications share a small library, ``synarius_apps_diagnostics``, for file logging,
-uncaught-exception handling, optional Python ``faulthandler`` output, and routing Qt messages into
-Python's ``logging`` system.
+uncaught-exception handling, Python ``faulthandler`` output (enabled by default; see below), and
+routing Qt messages into Python's ``logging`` system.
 
 Log file location
 -----------------
@@ -66,7 +66,7 @@ Environment variables
    * - ``SYNARIUS_DATAVIEWER_LOG_DEBUG``
      - DataViewer-specific override.
    * - ``SYNARIUS_FAULT_HANDLER``
-     - If truthy: enable ``faulthandler`` writing to the main log file (useful for hangs / native crashes).
+     - **Default:** ``faulthandler`` is **on** and writes to the main log file (helps with hangs / native crashes). Set to ``0``, ``false``, ``no``, or ``off`` to **disable** it explicitly.
 
 Qt messages
 -----------

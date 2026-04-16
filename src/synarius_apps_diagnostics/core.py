@@ -1,4 +1,4 @@
-"""Rotating file logs, sys/threading excepthook, optional faulthandler, Qt message handler."""
+"""Rotating file logs, sys/threading excepthook, faulthandler (default on; opt-out via env), Qt message handler."""
 
 from __future__ import annotations
 
@@ -53,6 +53,14 @@ def _debug_from_env(env_keys: Sequence[str]) -> bool:
     if os.environ.get("SYNARIUS_LOG_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}:
         return True
     return False
+
+
+def _fault_handler_disabled_by_env() -> bool:
+    """When ``SYNARIUS_FAULT_HANDLER`` is explicitly ``0``/``false``/``no``/``off``, skip ``faulthandler``."""
+    v = os.environ.get("SYNARIUS_FAULT_HANDLER", "").strip().lower()
+    if not v:
+        return False
+    return v in {"0", "false", "no", "off"}
 
 
 def configure_file_logging(
@@ -111,7 +119,7 @@ def configure_file_logging(
     _install_excepthook(uncaught_logger_name)
     _install_threading_excepthook(uncaught_logger_name)
 
-    if os.environ.get("SYNARIUS_FAULT_HANDLER", "").strip().lower() in {"1", "true", "yes", "on"}:
+    if not _fault_handler_disabled_by_env():
         try:
             import faulthandler
 

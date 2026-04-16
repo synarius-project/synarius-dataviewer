@@ -83,6 +83,15 @@ class PixmapScopeWidget(QWidget):
         self._panning = False
         self._pan_last: QPoint | None = None
 
+        # Decouple data writes from rendering: set_series only marks dirty; a
+        # 25 Hz QTimer flushes the pixmap so high-frequency simulation ticks
+        # do not trigger a full repaint on every step.
+        self._series_dirty = False
+        self._flush_timer = QTimer(self)
+        self._flush_timer.setInterval(40)  # 25 Hz
+        self._flush_timer.timeout.connect(self._flush_dirty)
+        self._flush_timer.start()
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(0, self._margin_top + self._margin_bottom)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -108,7 +117,16 @@ class PixmapScopeWidget(QWidget):
             "pen": pen,
             "visible": visible,
         }
-        self._apply_walk_or_refresh()
+        # Mark dirty instead of refreshing immediately so that high-frequency
+        # simulation ticks do not trigger a full repaint on every step.
+        # _flush_dirty fires at 25 Hz via _flush_timer.
+        self._series_dirty = True
+
+    def _flush_dirty(self) -> None:
+        """Timer slot: rebuild the pixmap if series data changed since the last flush."""
+        if self._series_dirty:
+            self._series_dirty = False
+            self._apply_walk_or_refresh()
 
     def set_series_visible(self, name: str, visible: bool) -> None:
         """Toggle trace visibility without auto-ranging (legend checkboxes)."""
