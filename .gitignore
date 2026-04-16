@@ -14,3 +14,4 @@ docs/_sphinx_test_build/
 venv/
 parawiz-profile.txt
 .env
+.coverage
