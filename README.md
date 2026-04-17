@@ -2,7 +2,9 @@
 
 ![Synarius title image](docs/_static/synarius-title.png)
 
-**synarius-apps** bundles the **Synarius DataViewer** (MDI desktop app for inspecting time-series and measurements), **Synarius ParaWiz** (desktop app for comparing and editing calibration parameters across datasets), and shared Qt UI pieces under **`synariustools`**, especially the reusable scope/legend plot widget. It depends on **[synarius-core](https://github.com/synarius-project/synarius-core)**.
+**synarius-apps bundles focused Synarius desktop tools**—plus reusable Qt widgets—so you can **plot measurement channels** and **compare calibration parameters** without opening the full Studio IDE.
+
+It depends on **[synarius-core](https://github.com/synarius-project/synarius-core)** for the shared data model and measurement I/O.
 
 | | |
 |--|--|
@@ -13,27 +15,38 @@
 
 **Note (Windows checkout):** If a junction `synarius-apps` still points at a folder named `synarius-dataviewer`, that layout is fine. To rename the directory in place: close tools using it, remove only the junction (`rmdir synarius-apps`), then rename the real folder to `synarius-apps`.
 
-## Synarius DataViewer
+## What is this?
+
+**Synarius Apps** is the “sidecar” layer of Synarius: **PySide6 applications** and **shared UI code** (`synariustools`) that teams use next to Studio or on their own.
+
+## Included tools
+
+### Synarius DataViewer
 
 ![Synarius DataViewer — oscilloscope, toolbar, and signal legend](docs/images/DataViewer.png)
 
-The **Synarius DataViewer** is a PySide6 application for exploring **multi-channel time-series**: an **oscilloscope-style plot** (zoom, pan, rubber-band zoom, optional walking time window), a **legend** with per-channel visibility, live values, and optional **A/B cursors**, plus **drag-and-drop** (or programmatic) channel loading. The same plot stack is used when **Synarius Studio** opens a live viewer for a diagram **DataViewer** block. Implementation lives in `src/synarius_dataviewer/` and `src/synariustools/tools/plotwidget/`; run it with the console entry point **`synarius-dataviewer`**.
+**What it does:** explore **multi-channel time-series** with an **oscilloscope-style** plot (zoom, pan, rubber-band zoom, optional rolling window), a **legend** with per-channel visibility and live values, optional **A/B cursors**, and **drag-and-drop** (or programmatic) channel loading.
 
-## Synarius ParaWiz
+**When to use it:** you have a log or measurement file and need to **see signals quickly**. The same plot stack is used when **Synarius Studio** opens a live viewer for a diagram **DataViewer** block.
+
+**Run:** `synarius-dataviewer`  
+**Implementation:** `src/synarius_dataviewer/` and `src/synariustools/tools/plotwidget/`.
+
+### Synarius ParaWiz
 
 ![Synarius ParaWiz — parameter table, curve editor, and map editor](docs/images/ParaWiz.png)
 
-**Synarius ParaWiz** is a PySide6 **parameter-workbench** built on the same **synarius-core** model and **Controller Command Protocol (CCP)** as Synarius Studio. Typical workflow:
+**What it does:** **compare and edit parameter sets** (for example DCM-based calibration data) in one **table**: one row per calibration name, one column per dataset, with optional **filters** (name search, hide equal / show only differing rows).
 
-- **Load and compare** two or more **parameter datasets** (e.g. DCM-based) in a single **table**: one row per calibration name, one column per dataset, with optional **filters** (name search, hide equal / show only differing rows).
-- **Visual diff**: cell styling and icons highlight **scalar vs. curve vs. map** parameters and cross-dataset differences.
-- **Deep inspection**: double-click opens dedicated editors for **CURVE** (tabular breakpoints + 2D plot) and **MAP** (value matrix, axis labels, **3D surface** preview). Edits follow the same rules as the rest of the Synarius toolchain (repository-backed parameters).
-- **Scratch target**: copy selected parameters into a dedicated **`parawiz_target`** dataset for staging changes without overwriting comparison files.
-- **Console**: optional **CLI / CCP** integration for scripting (`select`, `cp`, dataset registration, …).
+- **Visual diff:** cell styling and icons highlight **scalar vs. curve vs. map** parameters and cross-dataset differences.  
+- **Deep inspection:** double-click opens editors for **CURVE** (tabular breakpoints + 2D plot) and **MAP** (value matrix, axis labels, **3D surface** preview). Edits follow the same rules as the rest of the Synarius toolchain (repository-backed parameters).  
+- **Scratch target:** copy selected parameters into a dedicated **`parawiz_target`** dataset for staging changes without overwriting comparison files.  
+- **Console:** optional **CLI / CCP** integration for scripting (`select`, `cp`, dataset registration, …).
 
-Implementation lives in `src/synarius_parawiz/`; run it with **`synarius-parawiz`**.
+**Run:** `synarius-parawiz`  
+**Implementation:** `src/synarius_parawiz/`.
 
-## Install (development)
+## Quickstart
 
 **Python 3.11–3.14** is supported (see `requires-python` in `pyproject.toml`). Use a **virtual environment** and the **same** interpreter for `pip`/`python` and for your IDE.
 
@@ -59,17 +72,24 @@ cd ../synarius-apps && python -m pip install -e .
 
 If `pip` reports a conflict between the pinned Git revision of `synarius-core` and your local editable core, install the app with `python -m pip install -e . --no-deps` after `python -m pip install -e "../synarius-core[timeseries]"`, then add missing deps manually.
 
-Console entry point (name kept for compatibility):
-
 ```bash
 synarius-dataviewer
-```
-
-ParaWiz entry point:
-
-```bash
 synarius-parawiz
 ```
+
+## Screenshots
+
+See the **DataViewer** and **ParaWiz** sections above.
+
+## Contributing
+
+These apps are where **measurement UX** and **parameter workflows** get refined.
+
+- **Issues:** https://github.com/synarius-project/synarius-apps/issues  
+- **Guidelines:** https://synarius-project.github.io/synarius-guidelines/programming_guidelines.html  
+- **This repo:** [CONTRIBUTING.md](CONTRIBUTING.md) · [CLA.md](CLA.md)  
+
+**Boundary:** keep **file I/O and domain rules** aligned with **synarius-core** when possible; keep **Qt screens and app wiring** here.
 
 ## Branches and automation
 
@@ -88,12 +108,12 @@ git push origin v0.0.1
 
 ## Layout
 
-- `src/synarius_dataviewer/` — Dataviewer application package (console script `synarius-dataviewer`)
-- `src/synarius_parawiz/` — ParaWiz application package (console script `synarius-parawiz`)
-- `src/synariustools/tools/plotwidget/` — reusable Qt plot widget (`DataViewerWidget`, `create_data_viewer`, …)
-- `docs/` — Sphinx + sphinx-needs + zerovm theme
-- `synarius_dataviewer.spec` — PyInstaller one-file spec for the Windows installer job
-- `DISCLAIMER.txt` — license text shown in the MSI
+- `src/synarius_dataviewer/` — Dataviewer application package (console script `synarius-dataviewer`)  
+- `src/synarius_parawiz/` — ParaWiz application package (console script `synarius-parawiz`)  
+- `src/synariustools/tools/plotwidget/` — reusable Qt plot widget (`DataViewerWidget`, `create_data_viewer`, …)  
+- `docs/` — Sphinx + sphinx-needs + zerovm theme  
+- `synarius_dataviewer.spec` — PyInstaller one-file spec for the Windows installer job  
+- `DISCLAIMER.txt` — license text shown in the MSI  
 
 ### Plot widget (embedded use)
 
